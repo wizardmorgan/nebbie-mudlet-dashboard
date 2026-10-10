@@ -1,12 +1,82 @@
 # CHANGELOG — nebbie-complete-dashboard-package
 
-## 1.15.14 — 2026-09-26
+## 1.15.36 — 2026-10-05
 
-- **Repo dedicato** `wizardmorgan/nebbie-mudlet-dashboard` — URL `npackageupdate` / GMCP aggiornati.
-- **Note speedwalk**: colore `<grey>` a righe complete (niente tag `<dark_grey>` visibili a schermo).
-- **Layout destra**: colonna più larga (auto fino ~58 caratteri / 42% finestra); speedwalk più alto
-  (cap 48% se spell ≥50%; con `nheights` basso lo speedwalk usa tutto lo spazio sotto le spell).
-- **Versione interna** alzata a 1.15.14.
+- **usa (critico)**: `usa flamberga` non usava più `boris`/`noor` sbagliati — rispetta
+  l'argomento digitato, risolve da `displayName`/`nebbie-item-keywords.txt` (es.
+  `flamberga boris`); zaino con stessa logica delle macro fame (`korred`, non ultima parola).
+
+## 1.15.35 — 2026-10-05
+
+- **npackageupdate**: scarica il `.mpackage` con **`downloadFile` + `?cb=`** e installa dal
+  file locale (GitHub raw serviva spesso la versione precedente con `installPackage(URL)`).
+- Include **1.15.34** (GUI Equip+Speedwalk sinistra, no spell) se eri rimasto a 1.15.33.
+
+## 1.15.34 — 2026-10-05
+
+- **GUI**: rimosso pannello **Spell attivi**; niente bordo destro — solo colonna sinistra
+  **Equip** (sopra) + **Speedwalk** (sotto). Altezze **proporzionali al testo** (righe stimate);
+  override manuale con **`nheights <10-90>`** o **`nheights auto`**. Larghezza unica **`nwidth`**.
+- **Equip**: slot vuoti evidenziati (**`▢ VUOTO ▢`** giallo/rosso).
+
+## 1.15.33 — 2026-10-05
+
+- **Config (semplificata)**: dati in **`.config/mudlet/profiles/ndashboard/`** (Windows:
+  `C:\Users\<utente>\.config\mudlet\profiles\ndashboard`), condivisa tra profili Mudlet.
+  File indice **`profiles/nebbie-dash-config-root.txt`** (percorso assoluto). Rimossi override
+  env/`~/NebbieDash`. Al boot: crea `ndashboard` + scheletri file testo vuoti/commentati.
+  Migrazione automatica da home profilo o da `~/NebbieDash`.
+
+## 1.15.32 — 2026-10-05
+
+- **npackageupdate (critico)**: dopo `uninstallPackage` lo script del package non arrivava mai a
+  `installPackage` (profilo senza comandi `n*`). Installazione differita su `_G` + `tempTimer` con
+  callback stringa; URL `.mpackage` senza `?cb=` (Mudlet rifiuta query dopo l'estensione).
+- Handler di backup su `sysUninstallPackage` per schedulare l'install se il timer principale fallisce.
+
+## 1.15.31 — 2026-10-05
+
+- **GUI**: rimosso pannello **Armi** (colonna equip a tutta altezza).
+- **usa**: alias `usa <keyword>` per cambio arma (stessa logica di prima, senza click).
+- **Config centralizzata**: tutti i file `nebbie-*` e dati PG in **`~/NebbieDash/`**
+  (condiviso tra profili Mudlet); migrazione automatica dalla home del profilo.
+  Comando **`nconfigdir`**; override con `NEBBIE_DASH_CONFIG` o `~/NebbieDash/config-root.txt`.
+
+## 1.15.26 — 2026-09-27
+
+- **npackageupdate**: install in `NebbieDash.runPackageUpdateInstall` (sopravvive alla disinstallazione);
+  messaggio finale con versione Package Manager vs `v… pronto`; alias `npackageupdate force|forza`;
+  testo chiaro quando sei gia' all'ultima versione ma reinstalla comunque.
+
+## 1.15.25 — 2026-09-27
+
+- **Autoloot**: validazione rigida delle righe exp (non confonde lo split `La tua parte e' di N
+  monete`); debounce anti-triplo invio; attesa ~0,35 s prima del get; un solo flusso corp→pile
+  alla volta (niente pile di `tempTimer` che sparano get dopo un cambio stanza).
+- **Autosplit**: invariato — parte solo dopo **`C'erano N monete.`** tuo (se un compagno loota
+  prima, non parte il tuo `split`).
+
+## 1.15.24 — 2026-09-27
+
+- **Disarmo (critico)**: riga con colori `$c…` non matchava il pattern; nomi inglesi tipo
+  `the ebony kris` generavano `get ebony kris` (interpretato come prendi *ebony* dal contenitore
+  *kris*). Ora `stripColors`, nome intero con articolo inglese, override da
+  `nebbie-item-keywords.txt` invariato.
+
+## 1.15.23 — 2026-09-27
+
+- **npackageupdate (critico)**: `uninstallPackage` dentro l'alias `npackageupdate` poteva rimuovere
+  alias/trigger del package **prima** di `installPackage`, lasciando Mudlet senza comandi `n*`.
+  Disinstallazione + installazione ora avvengono al tick successivo (`tempTimer(0, …)`).
+- Rimosso l'early-return del chunk core sulla stessa versione (saltava `boot()` in coda allo script).
+
+## 1.15.22 — 2026-09-27
+
+- **Macro fame/sete (critico)**: il trigger `Hai Fame.` / `Hai sete.` continuava a scattare ma al
+  secondo giro i comandi fallivano (`Cosa vuoi rimuovere?`, tazza assente, ecc.) perché `{zaino}`
+  veniva ricalcolato male dopo il primo ciclo (`onStopUsingLine` + testo zaino post-`wear` senza
+  match override). Ora la parola chiave zaino resta in cache per personaggio (`hungerBackKeyword`)
+  e durante la macro non si svuota lo slot «sulla schiena» nella cache equip.
 
 ## 1.15.13 — 2026-09-26
 

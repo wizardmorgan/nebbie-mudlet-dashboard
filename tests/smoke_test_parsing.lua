@@ -17,7 +17,9 @@ function killTrigger() end
 local lastSent = nil
 local sentLog = {}
 function send(cmd) lastSent = cmd; table.insert(sentLog, cmd) end
-function tempTimer() end
+function tempTimer(_delay, arg)
+  if type(arg) == "function" then arg() end
+end
 function setBorderRight() end
 function setBorderLeft() end
 function createMiniConsole() end
@@ -129,6 +131,20 @@ check("eq: slot 9 con word-wrap concatenato", data.eq[9].item == "Il Guanto dell
 check("eq: slot 21 ultimo (item)", data.eq[21].item == "Glass no Kamen")
 check("eq: slot 21 ultimo (location)", data.eq[21].location == "davanti agli occhi")
 check("eq: capture chiusa (nessuna capture attiva)", NebbieDash._eqCapture == nil)
+
+-- Test 3a: cattura fallita (0 slot) non cancella l'equip già in cache
+local eqBackup = {}
+for k, v in pairs(data.eq) do eqBackup[k] = v end
+NebbieDash.startEqCapture()
+line = ""
+NebbieDash.onEqCaptureLine()
+check("eq vuota: capture ancora attiva dopo riga vuota iniziale", NebbieDash._eqCapture ~= nil)
+line = "NomiyaMaki H: 100/100 M: 100/100 V: 100/100 x:0 *:* *:* [[D]] G:0 >>"
+NebbieDash.onEqCaptureLine()
+check("eq vuota: capture ancora attiva dopo prompt senza slot", NebbieDash._eqCapture ~= nil)
+NebbieDash.finishEqCapture()
+check("eq vuota: slot in cache invariati", NebbieDash.countSlots(data.eq) == 21)
+check("eq vuota: slot 16 ancora impugnato", data.eq[16] and data.eq[16].item == "La Flamberga di Boris")
 
 -- Test 3b: la posizione viene sempre letta dalla riga stessa, non da una
 -- tabella statica per indice — verifica esplicita che un ordine "anomalo"
@@ -363,6 +379,10 @@ check("loot: isGroupHeaderLine con nome gruppo",
   NebbieDash.isGroupHeaderLine('$c0015Your group "I cacciatori" consists of:'))
 check("loot: isGroupHeaderLine senza nome gruppo",
   NebbieDash.isGroupHeaderLine("$c0015Your group consists of:"))
+check("loot: riga split monete NON e' fine combattimento",
+  not NebbieDash.isCombatExpLine("La tua parte e' di 4000 monete."))
+check("loot: riga exp gruppo riconosciuta",
+  NebbieDash.isCombatExpLine("La tua parte di esperienza e' di 168085 punti."))
 
 -- 8a: la riga "Prendi gold coins da ..." da sola non fa scattare nulla (non
 -- contiene l'importo, solo il nome del cadavere, che varia per ogni mostro).
@@ -373,10 +393,25 @@ check("loot: riga 'Prendi...' da sola non genera comandi",
   #sentLog == sentBefore8a)
 
 -- 8b: la riga con l'importo avvia il controllo gruppo (invio di "group").
+NebbieDash._lastLootFp = nil
+NebbieDash._lastLootFpAt = nil
+NebbieDash._groupCheckActive = false
+NebbieDash._pendingSplitAmount = nil
 line = "C'erano 100000 monete."
 NebbieDash.onLootLine()
 check("loot: importo riconosciuto correttamente", NebbieDash._pendingSplitAmount == 100000)
 check("loot: dopo il loot invia 'group' per il controllo", lastSent == "group")
+
+line = "C'erano 150000 monete."
+NebbieDash._lastLootFp = nil
+NebbieDash._lastLootFpAt = nil
+NebbieDash._groupCheckActive = false
+NebbieDash._pendingSplitAmount = nil
+sentLog = {}
+NebbieDash.onLootLine()
+NebbieDash.onLootLine()
+check("loot: doppio trigger stessa riga C'erano -> un solo group/split pending",
+  NebbieDash._pendingSplitAmount == 150000 and #sentLog == 1)
 
 -- 8c: risposta "da soli" -> nessuno split inviato, stato ripulito.
 line = "But you are a member of no group?!"
@@ -421,12 +456,23 @@ line = "Uno Spazzino is dead! R.I.P."
 check("combattimento: riga 'is dead!' da sola non genera comandi", #sentLog == 0)
 
 line = "La tua parte di esperienza e' di 1047 punti."
+NebbieDash._lastAutoLootClock = nil
+NebbieDash._lootFlowActive = false
 NebbieDash.onCombatEndLine()
 check("combattimento: fine combattimento avvia il loot automatico", sentLog[1] == "get all.coin corp")
+
+sentLog = {}
+NebbieDash._lastAutoLootClock = nil
+NebbieDash._lootFlowActive = false
+line = "La tua parte di esperienza e' di 1047 punti."
+for _ = 1, 3 do NebbieDash.onCombatEndLine() end
+check("combattimento: piu' trigger sulla stessa exp -> un solo get corp", #sentLog == 1)
 
 -- Anche con 0 punti di esperienza (uccisione minima) deve comunque scattare.
 sentLog = {}
 line = "La tua parte di esperienza e' di 0 punti."
+NebbieDash._lastAutoLootClock = nil
+NebbieDash._lootFlowActive = false
 NebbieDash.onCombatEndLine()
 check("combattimento: scatta anche con 0 punti esperienza", sentLog[1] == "get all.coin corp")
 
@@ -489,6 +535,12 @@ sentLog = {}
 line = "Ti disarmano e la Flamberga di Boris vola dalla tua presa."
 NebbieDash.onDisarmLine()
 check("disarmo: 'get flamberga boris' inviato automaticamente", sentLog[1] == "get flamberga boris")
+
+sentLog = {}
+line = "$c0015Ti disarmano e the ebony kris vola dalla tua presa."
+NebbieDash.onDisarmLine()
+check("disarmo: stripColors + nome inglese -> get the ebony kris (non get ebony kris)",
+  sentLog[1] == "get the ebony kris")
 
 NebbieDash.autoDisarmRecover = false
 sentLog = {}
@@ -623,7 +675,11 @@ NebbieDash.itemKeywordOverrides = {}
 -- Il file di override e' usato anche dal recupero arma dopo un disarmo.
 NebbieDash.itemKeywordOverrides["la flamberga di boris"] = "flamberga boris"
 check("keyword oggetto: usata anche per il recupero arma dopo disarmo",
-  select(1, NebbieDash.resolveItemKeywords("la Flamberga di Boris")) == "flamberga boris")
+  NebbieDash.resolveDisarmKeywords("la Flamberga di Boris") == "flamberga boris")
+NebbieDash.itemKeywordOverrides["the ebony kris"] = "kris"
+check("keyword oggetto: override disarmo ebony kris",
+  select(1, NebbieDash.resolveDisarmKeywords("the ebony kris")) == "kris" and
+  select(2, NebbieDash.resolveDisarmKeywords("the ebony kris")) == true)
 NebbieDash.itemKeywordOverrides = {}
 
 -- Parsing di una riga del file (formato "Nome oggetto: parole chiave").
@@ -758,6 +814,25 @@ for _, row in ipairs(NebbieDash.buildEquipRows(wdata)) do
 end
 check("armi: patchCachedEqLocation aggiorna impugnato",
   impRow and not impRow.empty and impRow.item == "La Flamberga di Boris")
+
+-- Slot numerici del gioco (15/16/17) non coincidono con EQ_SLOT_ORDER (16=impugnato):
+-- aggiornare impugnato non deve cancellare tenuto in [16].
+wdata.eq = {
+  [16] = { location = "tenuto", item = "Una torcia" },
+  [17] = { location = "sulla schiena", item = "Borsa Inesauribile dei Korred" },
+}
+wdata.eqUpdated = os.time()
+NebbieDash.patchCachedEqLocation(wdata, "impugnato", "La Flamberga di Boris")
+local tenRow, impRow2 = nil, nil
+for _, row in ipairs(NebbieDash.buildEquipRows(wdata)) do
+  if row.location == "tenuto" then tenRow = row end
+  if row.location == "impugnato" then impRow2 = row end
+end
+check("armi: patch impugnato non svuota tenuto",
+  tenRow and not tenRow.empty and tenRow.item == "Una torcia")
+check("armi: patch impugnato con tenuto in slot 16",
+  impRow2 and not impRow2.empty and impRow2.item == "La Flamberga di Boris")
+
 check("armi: currentWieldedKeyword segue cache impugnato",
   NebbieDash.keywordsOverlap(NebbieDash.currentWieldedKeyword(wdata), "flamberga boris"))
 check("armi: swap termina con wear zaino", swapSteps[#swapSteps] == "wear korred")
@@ -1044,6 +1119,25 @@ check("ident batch: identBatchParseFilter resume", r1 and t1 == "")
 check("ident batch: identBatchParseFilter resume toon", r2 and t2 == "Astaroth")
 check("ident batch: identBatchParseFilter toon normale", not r3 and t3 == "Montero")
 os.remove(resumeCsv)
+
+check("groupcmd: parseGroupSaySpeaker con colori server",
+  (function()
+    local s, p = NebbieDash.parseGroupSaySpeaker(
+      "$c0012[$c0015Martin$c0012] dice al gruppo 'dro'")
+    return s == "Martin" and p == "dro"
+  end)())
+check("groupcmd: groupCmdSpeakerKey primo token",
+  NebbieDash.groupCmdSpeakerKey("Martin") == "martin")
+check("groupcmd: expandGroupCmdTemplate",
+  NebbieDash.expandGroupCmdTemplate("adrenalize {name}", "Chunli") == "adrenalize chunli")
+check("groupcmd: normalizeGroupCmdTemplate aggiunge {name}",
+  NebbieDash.normalizeGroupCmdTemplate("adrenalize") == "adrenalize {name}")
+
+check("package update: isValidMpackageInstallUrl",
+  NebbieDash.isValidMpackageInstallUrl(PKG_MPACKAGE_URL or
+    "https://raw.githubusercontent.com/wizardmorgan/nebbietest/nebbie-mudlet-dashboard/nebbie-complete-dashboard-package.mpackage")
+  and not NebbieDash.isValidMpackageInstallUrl(
+    "https://example.com/foo.mpackage?cb=1"))
 
 print("")
 if failures == 0 then

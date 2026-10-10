@@ -1,1 +1,3 @@
-nebbie-complete-dashboard-package-build/
+nebbie-spells-skills-build/
+nebbie-play-all-build/*
+!nebbie-play-all-build/nebbie-install.lua

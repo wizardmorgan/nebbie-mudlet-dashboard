@@ -14,24 +14,23 @@ segue la stessa versione dello script).
 
 ### Installazione / aggiornamento
 
-1. **Consigliato in gioco (GMCP)**: abilita GMCP nel profilo Nebbie, riconnettiti — il server
-   invia `Client.GUI` con URL e versione; Mudlet scarica/aggiorna il package se la versione
-   installata è più vecchia (richiede server con GMCP aggiornato).
-2. **Comando Mudlet**: **`npackageupdate`** — disinstalla la versione corrente e scarica di nuovo
-   dal branch `mudlet` (Mudlet non permette `installPackage` sopra un package gia' installato).
-3. **Package Manager (Alt+O)**: Installa di nuovo il `.mpackage` scaricato da GitHub (stesso nome
-   package = upgrade). Mudlet **non** controlla GitHub da solo senza GMCP/`npackageupdate`/mpkg repo.
+1. **Package Manager (Alt+O)** — metodo principale da **1.15.40**:
+   - Seleziona `nebbie-complete-dashboard-package` nell’elenco.
+   - Se Mudlet mostra **Aggiorna**, usalo (legge l’URL dal campo `website` nel `config.lua` del package).
+   - Altrimenti: **Installa da URL** e incolla:
+     `https://raw.githubusercontent.com/wizardmorgan/nebbietest/nebbie-mudlet-dashboard/nebbie-complete-dashboard-package.mpackage`
+   - Oppure trascina quel link sul profilo Mudlet (Mudlet 4.11+).
+   - Stesso nome package = upgrade senza disinstallare manualmente (se Mudlet lo propone).
+2. **In gioco (GMCP)**: con GMCP attivo, al login il server invia `Client.GUI` (URL + versione);
+   Mudlet può offrire il download se la versione installata è più vecchia (server Nebbie aggiornato).
 
-Passi manuali classici:
+Dopo ogni aggiornamento:
 
-1. In Mudlet: `Package Manager` (icona valigetta, o `Giocatore → Gestione pacchetti`).
-2. Se `nebbie-complete-dashboard-package` è già installato, **disinstallalo** (bottone `-`).
-3. **Chiudi completamente Mudlet** e riaprilo (solo “riconnessione” non basta: altrimenti resta
-   in memoria la vecchia versione, es. v1.14.1, anche dopo un install).
-4. Installa (bottone `+`) il `.mpackage` scaricato dal branch **`mudlet`**.
-5. In output deve comparire **`[NebbieDash] v1.15.8 pronto`** (numero allineato al CHANGELOG e
-   alla versione in Package Manager). Se vedi numeri discordi, usa **`npackageupdate`** o
-   disinstall → **quit Mudlet** → reinstall. Poi `nresync` dopo il login.
+- In output: **`[NebbieDash] vX.Y.Z pronto`** — deve coincidere con la versione in Package Manager.
+- Se Package Manager e `v… pronto` differiscono: **`nfix`** o **chiudi e riapri Mudlet** (non solo riconnetti).
+- Poi **`nresync`** dopo il login.
+
+Installazione da file locale: bottone `+` nel Package Manager e scegli il `.mpackage` scaricato da GitHub.
 
 ## Icona e descrizione nella "Gestione pacchetti"
 
@@ -58,7 +57,9 @@ Nessun alias invia comandi al MUD in automatico all'avvio (scelta deliberata, ve
 | `nwidth <equip\|right> <numero>` | Fissa una larghezza manuale (150–900px) per la colonna equip (sinistra) o spell/speedwalk (destra), **disattivando** l'adattamento automatico per quella colonna. Senza indicare `equip`/`right` agisce sulla destra (retrocompatibilità). |
 | `nwidth <equip\|right> auto` | Riattiva la larghezza automatica per quella colonna (default per entrambe): si allarga/restringe da sola in base al contenuto più lungo visibile, senza mai superare il 60% della finestra di Mudlet. |
 | `nheights <percentuale>` | Regola quanta altezza della colonna destra va a "Spell attivi" (10–90, il resto va a "Speedwalk"; default 40). |
-| `nleftheights <percentuale>` | Regola quanta altezza della colonna sinistra va a "Equip" (10–90, il resto va a "Armi"; default 60). |
+| `nleftheights <percentuale>` | *(Legacy, da 1.15.31)* non fa più nulla: il pannello Armi è stato rimosso; la colonna equip usa tutta l'altezza. |
+| `usa <parola-chiave>` | Cambio arma da zaino (`rem`/`put`/`get`/`wield` come nebbie-play-all). Es. `usa redentore`. |
+| `nconfigdir` | Mostra **`profiles/ndashboard`** e il file **`profiles/nebbie-dash-config-root.txt`** (percorso da aprire in Explorer). |
 | `nclanslot <on\|off>` | Mostra/nasconde il 22° slot equip placeholder "simbolo del clan" (nascosto di default, non ancora confermato in un `eq` reale). |
 | `nitemlen <numero>` | Cambia quanti caratteri della descrizione oggetto mostrare prima di troncare con "…" (10–300, default 42). Alzalo se preferisci vedere più testo (andrà più facilmente a capo), abbassalo per evitare il più possibile il word-wrap. |
 | `nfix` | Reinstalla trigger e GUI senza disinstallare il package (utile se qualcosa sembra "bloccato"). |
@@ -71,7 +72,6 @@ Nessun alias invia comandi al MUD in automatico all'avvio (scelta deliberata, ve
 | `nspellwarn <n>` | Sotto quanti tick residui una spell attiva nel pannello viene mostrata in rosso invece che verde (default 5). |
 | `nforgetspell <nome>` | Toglie una riga dall'elenco pannello in memoria (e da vecchi dati `knownSpellOrder` se presente); aggiorna anche `nebbie-cast-spells.txt` a mano per renderlo permanente. |
 | `nspeedwalks` | Ricarica gli speedwalk dal file di configurazione dopo averlo modificato (vedi sotto), senza riavviare Mudlet. |
-| `npackageupdate` | Scarica e reinstalla il dashboard dal branch `mudlet` su GitHub (come GMCP `Client.GUI`). |
 | `nspeeddelay <secondi>` | Pausa tra un movimento e il successivo quando esegui uno speedwalk (default 0.35s). |
 | `nhelp` | Mostra/nasconde la finestra con l'elenco di tutti questi comandi (stessa finestra del tasto "? Comandi", vedi sotto). |
 | `nloot` | Prende le monete dal cadavere presente (prova sia `get all.coin corp` che `get all.coin pile`, per cadaveri normali e "pile of bones"). Normalmente non serve digitarlo: scatta da solo, vedi sotto. |
@@ -85,26 +85,39 @@ Nessun alias invia comandi al MUD in automatico all'avvio (scelta deliberata, ve
 | `nhungermacros` | Ricarica le macro fame/sete dal file di configurazione dopo averlo modificato (vedi sotto), senza riavviare Mudlet. |
 | `nitemkeywords` | Ricarica le parole chiave per oggetto (condivise tra tutti i personaggi) dal file di configurazione dopo averlo modificato (vedi sotto), senza riavviare Mudlet. |
 
-## Pannello Armi (sotto l'Equip, colonna sinistra)
+## Cambio arma (`usa`)
 
-Elenco persistente per personaggio di tutte le armi che hai impugnato almeno una volta, con il tipo
-di danno (slash/blunt/pierce) quando noto. Si popola da solo:
+Dalla **1.15.31** non c'è più il pannello "Armi" sotto l'Equip: la colonna sinistra mostra solo
+l'equip a tutta altezza. Il pacchetto continua a ricordare per personaggio le armi che hai impugnato
+(almeno una volta) e il tipo di danno quando lo scopri con `identify` — ma il cambio arma si fa con
+**`usa <parola-chiave>`** (es. `usa redentore`), non con un click.
 
-1. Impugni un'arma (`wield <qualcosa>`) → l'arma compare nell'elenco con tipo "?" (ancora sconosciuto).
-2. Esegui tu, quando vuoi, `identify` su quell'arma → il pacchetto legge l'output e aggiorna il tipo
-   di danno mostrato (slash/blunt/pierce). **`identify` non viene mai inviato in automatico** dal
-   pacchetto: è un comando/spell che costa una "ondata di stanchezza", quindi resta sempre una tua
-   scelta quando eseguirlo.
+Sequenza automatica (come nebbie-play-all): `rem`+`put` dell'arma attuale (slot "impugnato" nel
+pannello Equip) nello zaino "sulla schiena", poi `get`+`wield` dell'arma richiesta. Parole chiave:
+override in `nebbie-item-keywords.txt` se presente, altrimenti euristica (stessa logica del recupero
+dopo disarmo). Se non impugni nulla, salta a `get`+`wield`. Se l'arma richiesta è già quella
+impugnata, non invia nulla.
 
-Clicca il nome di un'arma in elenco per **cambiare arma con un solo click**: il pacchetto invia da
-solo, in sequenza, `rem`+`put` dell'arma che stai impugnando adesso (letta dal pannello Equip, slot
-"impugnato") nello zaino, poi `get`+`wield` dell'arma che hai scelto — usando lo stesso zaino (slot
-"sulla schiena") e lo stesso criterio di parole chiave (override da `nebbie-item-keywords.txt` se
-presente, altrimenti euristica automatica) già usato per il recupero arma dopo un disarmo e per le
-macro fame/sete. Se non stai impugnando nulla, salta direttamente a `get`+`wield`. Se clicchi l'arma
-che hai già impugnata, non invia nulla.
+## Cartella config (`profiles/ndashboard`)
 
-L'altezza di questo pannello rispetto all'Equip si regola con `nleftheights` (vedi tabella sopra).
+Tutti i file `nebbie-*.txt`, cache personaggi (`nebbie-complete-dashboard-package-chars.lua`),
+layout UI, log batch, ecc. stanno in:
+
+**`<cartella Mudlet>/profiles/ndashboard/`**
+
+Su Windows, con profilo tipico Mudlet:
+
+**`C:\Users\<nome>\.config\mudlet\profiles\ndashboard`**
+
+Il package crea la cartella al primo avvio e scrive anche un file indice (facile da trovare):
+
+**`C:\Users\<nome>\.config\mudlet\profiles\nebbie-dash-config-root.txt`**
+
+(apre quella cartella: contiene una riga con il percorso assoluto di `ndashboard`).
+
+Comando **`nconfigdir`** in gioco stampa gli stessi percorsi. I file `.txt` partono con scheletri
+commentati (speedwalk, spell shortcut, macro fame, …). All'aggiornamento da versioni precedenti,
+i file vengono copiati automaticamente dalla home del profilo Mudlet o da `~/NebbieDash` se presenti.
 
 ## Loot e split automatico
 
