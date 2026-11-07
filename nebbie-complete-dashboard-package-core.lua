@@ -9,7 +9,7 @@
 -- docs/mudlet/analysis/RECOMMENDATION.md. Pattern prompt/eq basati su dati reali
 -- forniti dall'utente (docs/mudlet/analysis/Q&A.md, Round 3).
 
-local PKG_VER = "1.15.49"
+local PKG_VER = "1.15.50"
 
 local _prevPkgVer = NebbieDash and NebbieDash._loadedVer
 -- Non uscire in anticipo dal chunk core (alias/trigger del package possono essere
@@ -2678,12 +2678,11 @@ end
 --     varia in base a chi/cosa causa la caduta — l'utente segnala che
 --     questo e' SOLO UNO dei possibili messaggi di caduta: se ce ne sono
 --     altri andranno aggiunti quando forniti, non li invento).
---   - Disarmo: "Ti disarmano e la Flamberga di Boris vola dalla tua presa."
---     — il nome dell'arma e' catturato DIRETTAMENTE da questa riga (non
---     dal pannello equip, che potrebbe non essere aggiornato), poi ripulito
---     dagli articoli/preposizioni italiane per ottenere le parole chiave
---     con cui il gioco identifica l'oggetto (confermato dall'utente per
---     "la Flamberga di Boris" → "flamberga boris").
+--   - Disarmo (arma a terra): "Ti disarmano e la Flamberga di Boris vola dalla tua presa."
+--     — get + wield dopo breve delay (oggetto caduto).
+--   - Disarmo (resta in mano, rune): es. "Ti disarmano e Nordagh, La rosa spinosa dei Noor ti sfugge
+--     dalle mani, ma le rune del luogo non la lasciano cadere." — solo wield (override da
+--     nebbie-item-keywords.txt se il nome in riga non coincide con le keyword MUD).
 -- ---------------------------------------------------------------------------
 NebbieDash.autoStand = true
 NebbieDash.autoDisarmRecover = true
@@ -2759,13 +2758,24 @@ function NebbieDash.onDisarmLine()
   if not NebbieDash.autoDisarmRecover then return end
   local text = line or (type(getCurrentLine) == "function" and getCurrentLine()) or ""
   text = NebbieDash.stripColors(text):match("^%s*(.-)%s*$") or ""
-  local weaponName = text:match("Ti disarmano e (.+) vola dalla tua presa%.?%s*$")
+  local weaponName, wieldOnly
+  weaponName = text:match("^Ti disarmano e (.-) ti sfugge dalle mani")
+  if weaponName then
+    wieldOnly = true
+  else
+    weaponName = text:match("^Ti disarmano e (.+) vola dalla tua presa%.?%s*$")
+    wieldOnly = false
+  end
   if not weaponName then return end
   weaponName = weaponName:match("^%s*(.-)%s*$")
   local keywords = NebbieDash.resolveDisarmKeywords(weaponName)
   if keywords == "" then return end
-  send("get " .. keywords, false)
-  tempTimer(0.5, function() send("wield " .. keywords, false) end)
+  if wieldOnly then
+    send("wield " .. keywords, false)
+  else
+    send("get " .. keywords, false)
+    tempTimer(0.5, function() send("wield " .. keywords, false) end)
+  end
 end
 
 function NebbieDash.cmdSetAutoStand(argStr)
@@ -5035,7 +5045,8 @@ function NebbieDash.installTriggers()
   NebbieDash._combatEndTrig = tempTrigger("La tua parte di esperienza", [[NebbieDash.onCombatEndLine()]])
   NebbieDash._combatEndTrig2 = tempTrigger("La tua esperienza e' aumentata di", [[NebbieDash.onCombatEndLine()]])
   NebbieDash._fallTrig = tempTrigger("Inciampi e cadi per terra.", [[NebbieDash.onFallLine()]])
-  NebbieDash._disarmTrig = tempTrigger("vola dalla tua presa", [[NebbieDash.onDisarmLine()]])
+  -- Shield largo: stessa riga "Ti disarmano e ..." per vola/sfugge (handler sceglie get+wield vs solo wield).
+  NebbieDash._disarmTrig = tempTrigger("Ti disarmano e", [[NebbieDash.onDisarmLine()]])
   NebbieDash._hungerTrig = tempRegexTrigger("^Hai Fame\\.", [[NebbieDash.onHungerThirstLine()]])
   NebbieDash._thirstTrig = tempRegexTrigger("^Hai sete\\.", [[NebbieDash.onHungerThirstLine()]])
   -- Elenco armi (vedi sezione dedicata sopra): "Impugni " per popolare la

@@ -1135,7 +1135,7 @@ check("groupcmd: normalizeGroupCmdTemplate aggiunge {name}",
 
 check("package update: isValidMpackageInstallUrl",
   NebbieDash.isValidMpackageInstallUrl(PKG_MPACKAGE_URL or
-    "https://raw.githubusercontent.com/wizardmorgan/nebbietest/nebbie-mudlet-dashboard/nebbie-complete-dashboard-package.mpackage")
+    "https://raw.githubusercontent.com/wizardmorgan/nebbie-mudlet-dashboard/main/nebbie-complete-dashboard-package.mpackage")
   and not NebbieDash.isValidMpackageInstallUrl(
     "https://example.com/foo.mpackage?cb=1"))
 

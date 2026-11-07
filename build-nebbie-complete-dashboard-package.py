@@ -73,8 +73,8 @@ profilo Mudlet, più personaggi, cambio automatico rilevato dal prompt).
   bones", `nloot` anche a mano) e, se sei in gruppo, divide l'importo con
   `split` (disattivabili singolarmente con `nautoloot off`/`nautosplit off`).
 - **Rialzarsi e recupero arma automatici**: `stand` da solo dopo una caduta;
-  `get`/`wield` da soli dell'arma persa dopo un disarmo (disattivabili con
-  `nautostand off`/`nautodisarm off`).
+  dopo disarmo con arma a terra `get`/`wield`; se l'arma resta in mano (rune) solo `wield`
+  (disattivabili con `nautostand off`/`nautodisarm off`).
 - **Ripetizione comandi**: digita `.4s` per inviare `s` quattro volte (vale
   per qualunque comando, non solo i movimenti).
 - **Corretto**: il personaggio attivo si azzera subito alla (ri)connessione,

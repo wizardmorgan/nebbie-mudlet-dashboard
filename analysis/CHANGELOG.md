@@ -1,5 +1,11 @@
 # CHANGELOG — nebbie-complete-dashboard-package
 
+## 1.15.50 — 2026-11-06
+
+- **Disarmo (armi trattenute da rune)**: su messaggio `... ti sfugge dalle mani, ma le rune ...`
+  invia solo `wield <keyword>` (no `get`). Keyword da `nebbie-item-keywords.txt` se serve.
+- Il messaggio classico `... vola dalla tua presa` resta `get` + `wield` come prima.
+
 ## 1.15.49 — 2026-10-11
 
 - **Keys**: al boot/`nfix` rimuove i tasti legacy `nebbie-keypad * num/nav` (duplicati lasciati da

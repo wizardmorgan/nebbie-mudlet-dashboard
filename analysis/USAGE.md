@@ -5,8 +5,8 @@ Guida rapida ai comandi (alias) del package, scritta dopo il primo test reale de
 
 ## Come installare/aggiornare
 
-Il file `.mpackage` aggiornato sta sul branch **`mudlet`** (non su `develop`):
-`docs/mudlet/nebbie-complete-dashboard-package.mpackage` nel repo GitHub.
+Il file `.mpackage` aggiornato e' su branch **`main`** di
+https://github.com/wizardmorgan/nebbie-mudlet-dashboard (`nebbie-complete-dashboard-package.mpackage`).
 
 **Versione**: in Package Manager deve coincidere con `[NebbieDash] vX.Y.Z pronto` (es. **1.15.8**).
 Se vedi numeri diversi, il `.mpackage` era vecchio (bug risolto in 1.15.8: `config.lua` ora
@@ -18,7 +18,7 @@ segue la stessa versione dello script).
    - Seleziona `nebbie-complete-dashboard-package` nell’elenco.
    - Se Mudlet mostra **Aggiorna**, usalo (legge l’URL dal campo `website` nel `config.lua` del package).
    - Altrimenti: **Installa da URL** e incolla:
-     `https://raw.githubusercontent.com/wizardmorgan/nebbietest/nebbie-mudlet-dashboard/nebbie-complete-dashboard-package.mpackage`
+     `https://raw.githubusercontent.com/wizardmorgan/nebbie-mudlet-dashboard/main/nebbie-complete-dashboard-package.mpackage`
    - Oppure trascina quel link sul profilo Mudlet (Mudlet 4.11+).
    - Stesso nome package = upgrade senza disinstallare manualmente (se Mudlet lo propone).
 2. **In gioco (GMCP)**: con GMCP attivo, al login il server invia `Client.GUI` (URL + versione);
