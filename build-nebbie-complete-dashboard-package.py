@@ -2,8 +2,8 @@
 """Build script for the "nebbie-complete-dashboard-package" Mudlet package.
 
 Genera un .mpackage minimo (config.lua + XML root, formato documentato in
-docs/mudlet/analysis/MUDLET-WIKI-NOTES.md §7) a partire da:
-  - docs/mudlet/nebbie-complete-dashboard-package-core.lua (logica principale)
+analysis/MUDLET-WIKI-NOTES.md §7) a partire da:
+  - nebbie-complete-dashboard-package-core.lua (logica principale)
 
 A differenza di build-nebbie-package.py (legacy, ~2000 righe, generazione da
 sorgente C++), questo script e' intenzionalmente piccolo: il package nuovo non
@@ -130,7 +130,7 @@ profilo Mudlet, più personaggi, cambio automatico rilevato dal prompt).
   scrive un log completo per ogni nome-toon in `<Toon>-YYYY-MM-DD.txt`.
 - **`nbatchverify`**: controlla i log batch rispetto al CSV e ai comandi attesi;
   report in `<Toon>-YYYY-MM-DD.verify.txt`. Script offline:
-  `docs/mudlet/tests/verify_batch_log.py`.
+  `tests/verify_batch_log.py`.
 - **`nidentbatch`**: `oload $3` poi identify/junk con **`$ed`** = **`ED`+nome-toon** ($1);
   output CSV giornaliero. **`nidentbatch resume`**: salta righe gia' nel CSV di oggi.
 
@@ -139,8 +139,7 @@ login per sincronizzare equip e spell. Vedi `nfix` se qualcosa sembra
 bloccato dopo un aggiornamento.
 
 Documentazione completa (tutti i comandi, formato file speedwalk, changelog):
-`docs/mudlet/analysis/USAGE.md` e `docs/mudlet/analysis/CHANGELOG.md` nel
-repository del progetto.
+`analysis/USAGE.md` e `analysis/CHANGELOG.md` in questo repository.
 """
 BUILD_DIR = os.path.join(HERE, "nebbie-complete-dashboard-package-build")
 XML_PATH = os.path.join(BUILD_DIR, f"{PKG_NAME}.xml")
