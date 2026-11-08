@@ -1,11 +1,18 @@
 # CHANGELOG — nebbie-complete-dashboard-package
 
+## 1.15.59 — 2026-11-08
+
+- **Know al look in stanza**: accanto al nome mob già in archivio appende tag
+  `[L51 | SUSC:… | IMM:… | RESI:… | HR>+4]` (info critiche; resto in `nknowdb`).
+- **`+N` = soglia hitroll arma** (non un tipo): armi +0..+N → 0 danni; serve +N+1.
+  ENERGY resta un tipo; `+4` è separato (`hitrollResistMax` / `hitrollImmuneMax`).
+
 ## 1.15.58 — 2026-11-08
 
 - **Know monster highlight**: evidenzia livello (`N^`), riga suscettibile (giallo su
   rosso), resistente, immune; riepilogo `[Know]` a fine cast.
 - Se un tipo è sia immune sia resistente, in archivio/riepilogo resta solo **immune**.
-- Parser: tollera `HOLD .` / `POISON .` e ignora token tipo `+4`.
+- Parser: tollera `HOLD .` / `POISON .`.
 
 ## 1.15.57 — 2026-11-08
 

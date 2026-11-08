@@ -9,7 +9,7 @@
 -- docs/mudlet/analysis/RECOMMENDATION.md. Pattern prompt/eq basati su dati reali
 -- forniti dall'utente (docs/mudlet/analysis/Q&A.md, Round 3).
 
-local PKG_VER = "1.15.58"
+local PKG_VER = "1.15.59"
 -- jsDelivr: raw.githubusercontent.com tiene spesso in cache .mpackage vecchi
 -- (osservato: main serviva ancora 1.15.51 dopo push 1.15.53). Commit-pin
 -- tramite @main su jsDelivr e' allineato al tip di GitHub.
@@ -4214,17 +4214,25 @@ function NebbieDash.normalizeKnowMonsterKey(name)
   return ((name or ""):lower():match("^%s*(.-)%s*$")) or ""
 end
 
+-- Spezza la lista tipi (FIRE COLD …). I token "+N" NON sono tipi: sono la
+-- soglia di hitroll dell'arma (armi da +0 a +N fanno 0 danni vs quella
+-- resist/immune). Restituisce bits, hitrollMax (numero N oppure nil).
 function NebbieDash.splitKnowBitList(text)
   local out = {}
+  local hitrollMax = nil
   for token in (text or ""):gmatch("%S+") do
-    -- "HOLD ." / "POISON ." → togli punteggiatura; ignora solo "." o "+4" isolati
-    -- (modificatori numerici non sono tipi immunità).
     token = token:gsub("[%.%,%;%:]+$", "")
-    if token ~= "" and not token:match("^[%+%-]?%d+$") then
+    local hr = token:match("^%+(%d+)$")
+    if hr then
+      local n = tonumber(hr)
+      if n and (not hitrollMax or n > hitrollMax) then
+        hitrollMax = n
+      end
+    elseif token ~= "" and not token:match("^%-%d+$") then
       table.insert(out, token)
     end
   end
-  return out
+  return out, hitrollMax
 end
 
 -- Se un tipo è sia immune sia resistente, vince immune: resta solo in immune.
@@ -4267,6 +4275,8 @@ function NebbieDash.parseKnowMonsterFull(lines)
     susceptible = nil,
     resistant = nil,
     immune = nil,
+    hitrollResistMax = nil, -- armi +0..+N fanno 0 vs quella resist
+    hitrollImmuneMax = nil, -- idem vs quella immune
     attacks = nil,
     damageDice = nil,
   }
@@ -4311,17 +4321,21 @@ function NebbieDash.parseKnowMonsterFull(lines)
       local nSus, sus = text:match("^(.+) e' suscettibile a (.+)%.%s*$")
       if nSus and sus then
         entry.monsterName = entry.monsterName or nSus
-        entry.susceptible = NebbieDash.splitKnowBitList(sus)
+        entry.susceptible = select(1, NebbieDash.splitKnowBitList(sus))
       end
       local nRes, res = text:match("^(.+) e' resistente a (.+)%.%s*$")
       if nRes and res then
         entry.monsterName = entry.monsterName or nRes
-        entry.resistant = NebbieDash.splitKnowBitList(res)
+        local bits, hrMax = NebbieDash.splitKnowBitList(res)
+        entry.resistant = bits
+        if hrMax ~= nil then entry.hitrollResistMax = hrMax end
       end
       local nImm, imm = text:match("^(.+) e' immune a (.+)%.%s*$")
       if nImm and imm then
         entry.monsterName = entry.monsterName or nImm
-        entry.immune = NebbieDash.splitKnowBitList(imm)
+        local bits, hrMax = NebbieDash.splitKnowBitList(imm)
+        entry.immune = bits
+        if hrMax ~= nil then entry.hitrollImmuneMax = hrMax end
       end
       local nAtt, att = text:match("^(.+) ha circa (%d+)%.0 attacchi per turno%.%s*$")
       if nAtt and att then
@@ -4338,6 +4352,98 @@ function NebbieDash.parseKnowMonsterFull(lines)
   if not entry.monsterName or entry.monsterName == "" then return nil end
   if not entry.race or entry.race == "" then return nil end
   return NebbieDash.applyKnowImmuneWins(entry)
+end
+
+-- Soglia hitroll effettiva (max tra resist e immune): armi +0..+N → 0 danni.
+function NebbieDash.knowHitrollThreshold(entry)
+  if not entry then return nil end
+  local a, b = entry.hitrollResistMax, entry.hitrollImmuneMax
+  if a and b then return math.max(a, b) end
+  return a or b
+end
+
+-- Tag corto da appendere al look in stanza (solo info critiche).
+function NebbieDash.formatKnowRoomTag(entry)
+  if not entry then return nil end
+  local resistant = NebbieDash.filterKnowResistantByImmune(entry.resistant, entry.immune)
+  local parts = {}
+  if entry.warriorLevel ~= nil then
+    table.insert(parts, "L" .. tostring(entry.warriorLevel))
+  end
+  if entry.susceptible and #entry.susceptible > 0 then
+    table.insert(parts, "SUSC:" .. table.concat(entry.susceptible, ","))
+  end
+  if entry.immune and #entry.immune > 0 then
+    table.insert(parts, "IMM:" .. table.concat(entry.immune, ","))
+  end
+  if resistant and #resistant > 0 then
+    table.insert(parts, "RESI:" .. table.concat(resistant, ","))
+  end
+  local hr = NebbieDash.knowHitrollThreshold(entry)
+  if hr ~= nil then
+    -- Serve arma con hitroll > N (es. +4 → serve +5).
+    table.insert(parts, "HR>+" .. tostring(hr))
+  end
+  if #parts == 0 then return nil end
+  return " [" .. table.concat(parts, " | ") .. "]"
+end
+
+function NebbieDash.normalizeKnowNameForMatch(name)
+  name = (name or ""):lower():match("^%s*(.-)%s*$") or ""
+  name = name:gsub("^l'", ""):gsub("^un'", "")
+  name = name:gsub("^il%s+", ""):gsub("^la%s+", ""):gsub("^lo%s+", "")
+  name = name:gsub("^un%s+", ""):gsub("^una%s+", ""):gsub("^uno%s+", "")
+  name = name:gsub("^gli%s+", ""):gsub("^le%s+", ""):gsub("^i%s+", "")
+  return name:match("^%s*(.-)%s*$") or ""
+end
+
+-- Trova la migliore entry know per una riga di presenza in stanza.
+function NebbieDash.findKnowEntryForRoomLine(text)
+  text = NebbieDash.stripColors(text or ""):lower()
+  if text == "" then return nil end
+  local best, bestScore = nil, 0
+  for _, entry in pairs((NebbieDash.knowDb and NebbieDash.knowDb.entries) or {}) do
+    local name = entry.monsterName or ""
+    local nameLow = name:lower()
+    local score = 0
+    if nameLow ~= "" and text:find(nameLow, 1, true) then
+      score = 100 + #nameLow
+    else
+      local bare = NebbieDash.normalizeKnowNameForMatch(name)
+      if bare ~= "" and #bare >= 4 and text:find(bare, 1, true) then
+        score = 50 + #bare
+      end
+    end
+    if score > bestScore then
+      best, bestScore = entry, score
+    end
+  end
+  if bestScore < 50 then return nil end
+  return best
+end
+
+function NebbieDash.onKnowRoomPresenceLine()
+  local text = line or (type(getCurrentLine) == "function" and getCurrentLine()) or ""
+  text = NebbieDash.stripColors(text or "")
+  -- Solo righe di presenza in stanza (look / entrata).
+  if not (text:find(" e' qui", 1, true)
+      or text:find(" sono qui", 1, true)
+      or text:find(" vola qui", 1, true)
+      or text:find(" giace qui", 1, true)
+      or text:find(" sta dormendo qui", 1, true)
+      or text:find(" sta riposando qui", 1, true)
+      or text:find(" sta galleggiando qui", 1, true)) then
+    return
+  end
+  local entry = NebbieDash.findKnowEntryForRoomLine(text)
+  if not entry then return end
+  local tag = NebbieDash.formatKnowRoomTag(entry)
+  if not tag then return end
+  if type(decho) == "function" then
+    decho("<255,200,0>" .. tag)
+  elseif type(cecho) == "function" then
+    cecho("<yellow>" .. tag)
+  end
 end
 
 function NebbieDash.upsertKnowRecord(parsed, character, source)
@@ -4361,6 +4467,12 @@ function NebbieDash.upsertKnowRecord(parsed, character, source)
   if parsed.susceptible ~= nil then existing.susceptible = parsed.susceptible end
   if parsed.resistant ~= nil then existing.resistant = parsed.resistant end
   if parsed.immune ~= nil then existing.immune = parsed.immune end
+  if parsed.hitrollResistMax ~= nil then
+    existing.hitrollResistMax = math.max(existing.hitrollResistMax or 0, parsed.hitrollResistMax)
+  end
+  if parsed.hitrollImmuneMax ~= nil then
+    existing.hitrollImmuneMax = math.max(existing.hitrollImmuneMax or 0, parsed.hitrollImmuneMax)
+  end
   if parsed.attacks ~= nil then existing.attacks = parsed.attacks end
   if parsed.damageDice ~= nil then existing.damageDice = parsed.damageDice end
   NebbieDash.applyKnowImmuneWins(existing)
@@ -4494,6 +4606,12 @@ function NebbieDash.echoKnowMonsterSummary(entry)
     cecho("<yellow>[Know] <green>RESISTENTE:<white> "
       .. table.concat(entry.resistant, " ")
       .. " <grey>(esclusi tipi già immune)\n")
+  end
+  local hr = NebbieDash.knowHitrollThreshold(entry)
+  if hr ~= nil then
+    cecho(string.format(
+      "<yellow>[Know] <orange>HITROLL:<white> armi +0..+%d → 0 danni; serve arma +%d o superiore.\n",
+      hr, hr + 1))
   end
 end
 
@@ -4633,6 +4751,12 @@ function NebbieDash.formatKnowDbEntry(entry)
   end
   if resistant and #resistant > 0 then
     table.insert(lines, "  <green>RESISTENTE:<white> " .. table.concat(resistant, " "))
+  end
+  local hr = NebbieDash.knowHitrollThreshold(entry)
+  if hr ~= nil then
+    table.insert(lines, string.format(
+      "  <orange>HITROLL:<white> +0..+%d inutili; serve arma +%d+",
+      hr, hr + 1))
   end
   local when = entry.lastAt and os.date("%Y-%m-%d %H:%M", entry.lastAt) or "?"
   local src = entry.lastSource and (" (" .. entry.lastSource .. ")") or ""
@@ -4979,6 +5103,11 @@ function NebbieDash.installTextHighlightTriggers()
     [[NebbieDash.onKnowHighlightResistantLine()]]))
   add(tempTrigger("e' immune a ",
     [[NebbieDash.onKnowHighlightImmuneLine()]]))
+  -- Annotazioni look stanza accanto al nome mob già in archivio know.
+  add(tempTrigger(" e' qui", [[NebbieDash.onKnowRoomPresenceLine()]]))
+  add(tempTrigger(" sono qui", [[NebbieDash.onKnowRoomPresenceLine()]]))
+  add(tempTrigger(" vola qui", [[NebbieDash.onKnowRoomPresenceLine()]]))
+  add(tempTrigger(" giace qui", [[NebbieDash.onKnowRoomPresenceLine()]]))
 end
 
 function NebbieDash.resolveWeaponTargetFromArg(data, argStr)

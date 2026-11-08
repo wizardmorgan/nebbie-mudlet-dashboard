@@ -1490,10 +1490,30 @@ local leoLines = {
 local leo = NebbieDash.parseKnowMonsterFull(leoLines)
 check("knowdb: leonessa suscettibile ACID POISON",
   leo and leo.susceptible and leo.susceptible[1] == "ACID" and leo.susceptible[2] == "POISON")
-check("knowdb: leonessa +4 non finisce in resistente",
-  leo and leo.resistant
-    and table.concat(leo.resistant, " "):find("+4", 1, true) == nil
+check("knowdb: leonessa ENERGY resta nei resistenti",
+  leo and leo.resistant and table.concat(leo.resistant, " "):find("ENERGY", 1, true) ~= nil
     and table.concat(leo.resistant, " "):find("FIRE", 1, true) ~= nil)
+check("knowdb: leonessa +4 = hitrollResistMax 4 (non un tipo)",
+  leo and leo.hitrollResistMax == 4
+    and table.concat(leo.resistant, " "):find("+4", 1, true) == nil)
+check("knowdb: soglia hitroll → serve arma +5",
+  NebbieDash.knowHitrollThreshold(leo) == 4)
+local leoTag = NebbieDash.formatKnowRoomTag(leo)
+check("knowdb: room tag contiene L50 e HR>+4",
+  leoTag and leoTag:find("L50", 1, true) and leoTag:find("HR>+4", 1, true)
+    and leoTag:find("SUSC:ACID", 1, true))
+-- Look stanza: annotazione accanto al nome
+NebbieDash.knowDb = { entries = {} }
+NebbieDash.upsertKnowRecord(leo, "Hayato", "spell")
+_G.__hlEchoLog = {}
+local oldDecho = decho
+decho = function(s) table.insert(_G.__hlEchoLog, tostring(s or "")) end
+line = "La leonessa madre e' qui, in piedi."
+NebbieDash.onKnowRoomPresenceLine()
+decho = oldDecho
+check("knowdb: look stanza appende tag HR/L",
+  table.concat(_G.__hlEchoLog):find("HR>+4", 1, true) ~= nil
+    and table.concat(_G.__hlEchoLog):find("L50", 1, true) ~= nil)
 
 print("")
 if failures == 0 then
