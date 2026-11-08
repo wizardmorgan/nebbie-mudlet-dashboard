@@ -135,12 +135,19 @@ nidentdb where mantello
 nidentdb char NomiyaMaki
 nidentdb hold Sirio
 nidentdb hold mantello Mirari
+nidentdb cedibile mantello
+nidentdb noncedibile anello
 nidentdb export Mirari
 nidentdbreload
 ```
 
 Stesso nome oggetto ma **caratteristiche diverse** (affects, AC, flags, …) → entry separate
 con suffisso `#2`, `#3`, …; stesso nome **e** stesse stats → aggiorna l’entry esistente.
+
+**Cedibile / inventario**: `give`/`drop` aggiornano il possesso **solo** se l’entry è
+`cedibile`. Con identify che ha `PROCAREA-REWARD` il flag si attiva da solo; altrimenti
+`nidentdb cedibile <oggetto>` / `nidentdb noncedibile <oggetto>`. Il match sul nome è stretto
+(un “Anello dei nani” non deve più agganciare un “anello varco…” in archivio).
 
 `where` mostra anche il possesso tracciato e l’incrocio con la cache equip (serve aver fatto
 `nresync`/`neq` sui PG rilevanti).
@@ -168,11 +175,13 @@ l'equip a tutta altezza. Il pacchetto continua a ricordare per personaggio le ar
 (almeno una volta) e il tipo di danno quando lo scopri con `identify` — ma il cambio arma si fa con
 **`usa <parola-chiave>`** (es. `usa redentore`), non con un click.
 
-Sequenza automatica (come nebbie-play-all): `rem`+`put` dell'arma attuale (slot "impugnato" nel
-pannello Equip) nello zaino "sulla schiena", poi `get`+`wield` dell'arma richiesta. Parole chiave:
-override in `nebbie-item-keywords.txt` se presente, altrimenti euristica (stessa logica del recupero
-dopo disarmo). Se non impugni nulla, salta a `get`+`wield`. Se l'arma richiesta è già quella
-impugnata, non invia nulla.
+Sequenza automatica (come nebbie-play-all): `rem` zaino → `get` arma → `rem`/`put` arma
+attuale → `wield` → `wear` zaino. Parole chiave: override in `nebbie-item-keywords.txt` se
+presente, altrimenti euristica. Se non impugni nulla, salta a `get`+`wield`. Se l'arma
+richiesta è già quella impugnata, non invia nulla.
+
+Dalla **1.15.62** lo slot «sulla schiena» non resta vuoto se il messaggio `Smetti di usare`
+dello zaino arriva in ritardo rispetto al `wear` (stash + restore; non serve `eq` a ogni `usa`).
 
 ## Cartella config (`profiles/ndashboard`)
 

@@ -851,6 +851,45 @@ check("armi: currentWieldedKeyword segue cache impugnato",
   NebbieDash.keywordsOverlap(NebbieDash.currentWieldedKeyword(wdata), "flamberga boris"))
 check("armi: swap termina con wear zaino", swapSteps[#swapSteps] == "wear korred")
 
+-- Race usa: rem zaino in ritardo dopo fine busy non deve lasciare schiena vuota
+NebbieDash.setCurrentCharacter("NomiyaMaki", true)
+local swapData = NebbieDash.getCharData("NomiyaMaki")
+swapData.eq = {
+  [16] = { location = "impugnato", item = "La Flamberga di Boris" },
+  [17] = { location = "sulla schiena", item = "Borsa Inesauribile dei Korred" },
+}
+swapData.eqUpdated = os.time()
+local swapGen = NebbieDash.beginWeaponSwapGuard(swapData)
+check("armi: beginWeaponSwapGuard stash zaino",
+  NebbieDash._weaponSwapBackItem == "Borsa Inesauribile dei Korred"
+    and NebbieDash._weaponSwapBusy == true)
+line = "Smetti di usare Borsa Inesauribile dei Korred."
+NebbieDash.onStopUsingLine()
+local schienaDuring = nil
+for _, row in ipairs(NebbieDash.buildEquipRows(swapData)) do
+  if row.location == "sulla schiena" then schienaDuring = row end
+end
+check("armi: rem zaino durante usa NON svuota schiena",
+  schienaDuring and not schienaDuring.empty
+    and schienaDuring.item == "Borsa Inesauribile dei Korred")
+line = "Ti metti Borsa Inesauribile dei Korred sulle spalle."
+NebbieDash.onWearBackLine()
+check("armi: wear zaino chiude guard swap", NebbieDash._weaponSwapBusy == false)
+-- Simula rem in ritardo dopo che busy e' gia' false ma stash ancora rilevante:
+NebbieDash._weaponSwapBackItem = "Borsa Inesauribile dei Korred"
+NebbieDash._weaponSwapBusy = false
+line = "Smetti di usare Borsa Inesauribile dei Korred."
+NebbieDash.onStopUsingLine()
+local schienaLate = nil
+for _, row in ipairs(NebbieDash.buildEquipRows(swapData)) do
+  if row.location == "sulla schiena" then schienaLate = row end
+end
+check("armi: rem zaino in ritardo NON svuota schiena",
+  schienaLate and not schienaLate.empty)
+NebbieDash.endWeaponSwapGuard(swapGen, true)
+NebbieDash._weaponSwapBackItem = nil
+NebbieDash._weaponSwapBusy = false
+
 -- cmdSwapWeapon non deve generare errori sui casi limite (nessun personaggio
 -- attivo, indice inesistente, nessuno zaino rilevato).
 NebbieDash.currentChar = nil
@@ -1286,6 +1325,27 @@ check("identdb: normalizeIdentItemText dall'",
 local matched = select(1, NebbieDash.matchIdentEntryByItemText("il mantello dall'ombra profonda"))
 check("identdb: matchIdentEntryByItemText su mantello identify",
   matched and matched.objectName == "mantello varco ombra profonda")
+check("identdb: PROCAREA-REWARD → cedibile auto",
+  NebbieDash.identDb.entries["mantello varco ombra profonda"]
+    and NebbieDash.identDb.entries["mantello varco ombra profonda"].cedibile == true)
+
+-- Anello generico non deve agganciarsi a un anello cedibile omonimo parziale
+NebbieDash.identDb.entries["anello varco chiave senza porta"] = {
+  key = "anello varco chiave senza porta",
+  objectName = "anello varco chiave senza porta",
+  objectType = "TREASURE",
+  flags = "PROCAREA-REWARD",
+  cedibile = true,
+  possession = { status = "held", character = "NomiyaMaki", via = "identify" },
+}
+check("identdb: match stretto rifiuta Anello dei nani → anello varco",
+  select(1, NebbieDash.matchIdentEntryByItemText("Anello dei nani", { onlyCedibile = true })) == nil)
+local anelloOwnerBefore = NebbieDash.identDb.entries["anello varco chiave senza porta"].possession.character
+NebbieDash.currentChar = "Sirio"
+line = "Dai un Anello dei nani a Betlegeuse."
+NebbieDash.onIdentGiveLine()
+check("identdb: give anello qualsiasi NON altera DB cedibile",
+  NebbieDash.identDb.entries["anello varco chiave senza porta"].possession.character == anelloOwnerBefore)
 
 NebbieDash.currentChar = "NomiyaMaki"
 line = "Dai il mantello dall'ombra profonda a Sirio."
@@ -1311,7 +1371,20 @@ check("identdb: hold assegna Mirari",
 check("identdb: listIdentDbByCharacter su possesso Mirari",
   #NebbieDash.listIdentDbByCharacter("Mirari") >= 1)
 
+-- Cedibile manuale
+NebbieDash.cmdIdentDbSetCedibile("mantello varco ombra profonda", false)
+check("identdb: noncedibile manuale",
+  afterHold.cedibile == false and afterHold.cedibileManual == true)
+line = "Dai il mantello dall'ombra profonda a Sirio."
+local mirariBefore = afterHold.possession.character
+NebbieDash.onIdentGiveLine()
+check("identdb: give su non-cedibile non aggiorna",
+  afterHold.possession.character == mirariBefore)
+NebbieDash.cmdIdentDbSetCedibile("mantello varco ombra profonda", true)
+check("identdb: cedibile manuale riattivato", afterHold.cedibile == true)
+
 -- Stesso nome, affects diverse → entry #2; stesso nome+stats → upsert
+local countBeforeAlt = NebbieDash.identDbEntryCount()
 local mantelloAlt = NebbieDash.parseIdentifyFull({
   "Oggetto: 'mantello varco ombra profonda', Tipo di Oggetto ARMOR",
   "L'oggetto e': RESISTANT ONLY-PRINCE PROCAREA-REWARD",
@@ -1326,15 +1399,15 @@ local mantelloAlt = NebbieDash.parseIdentifyFull({
 local altSaved = NebbieDash.upsertIdentRecord(mantelloAlt, "Mirari", "spell")
 check("identdb: stesso nome affects diverse → #2",
   altSaved and altSaved.key == "mantello varco ombra profonda#2"
-    and NebbieDash.identDbEntryCount() == 2)
+    and NebbieDash.identDbEntryCount() == countBeforeAlt + 1)
 local sameAgain = NebbieDash.upsertIdentRecord(mantelloAlt, "Mirari", "spell")
 check("identdb: stesso nome+stats → riusa #2",
   sameAgain and sameAgain.key == "mantello varco ombra profonda#2"
-    and NebbieDash.identDbEntryCount() == 2)
+    and NebbieDash.identDbEntryCount() == countBeforeAlt + 1)
 local origAgain = NebbieDash.upsertIdentRecord(mantello, "NomiyaMaki", "scroll")
 check("identdb: stats originali → riusa chiave senza #",
   origAgain and origAgain.key == "mantello varco ombra profonda"
-    and NebbieDash.identDbEntryCount() == 2)
+    and NebbieDash.identDbEntryCount() == countBeforeAlt + 1)
 
 -- Export CSV per PG
 local exportPath = NebbieDash.exportIdentDbCsvForCharacter("Mirari")

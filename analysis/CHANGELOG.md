@@ -1,5 +1,14 @@
 # CHANGELOG — nebbie-complete-dashboard-package
 
+## 1.15.62 — 2026-11-08
+
+- **Ident possesso (cedibile)**: give/drop aggiornano il DB solo se l’oggetto è
+  `cedibile`. Auto con flag identify `PROCAREA-REWARD`; override con
+  `nidentdb cedibile|noncedibile <oggetto>`. Match stretto (niente “Anello dei nani”
+  → “anello varco…”).
+- **usa / slot schiena**: evita che un `Smetti di usare` zaino in ritardo lasci
+  «sulla schiena» vuoto; stash + restore e timeout più lungo sul cambio arma.
+
 ## 1.15.61 — 2026-11-08
 
 - Docs/messaggi: **non esiste** “Installa da URL” in Package Manager. Istruzioni corrette:

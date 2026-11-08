@@ -9,7 +9,7 @@
 -- docs/mudlet/analysis/RECOMMENDATION.md. Pattern prompt/eq basati su dati reali
 -- forniti dall'utente (docs/mudlet/analysis/Q&A.md, Round 3).
 
-local PKG_VER = "1.15.61"
+local PKG_VER = "1.15.62"
 local PKG_REPO = "wizardmorgan/nebbie-mudlet-dashboard"
 local PKG_FILE = "nebbie-complete-dashboard-package.mpackage"
 -- @main su jsDelivr puo' restare stale (osservato: restava 1.15.56 mentre tip
@@ -2508,6 +2508,8 @@ NebbieDash.HELP_TEXT = {
   { "nidentdb char <nome>", "Identify / possesso di quel personaggio." },
   { "nidentdb hold <NomePg>", "Dopo un drop: assegna l'oggetto a terra a un PG." },
   { "nidentdb hold <ogg> <Pg>", "Assegna possesso identify a un PG (senza drop pendente)." },
+  { "nidentdb cedibile <ogg>", "Marca l'oggetto come cedibile (inventario give/drop)." },
+  { "nidentdb noncedibile <ogg>", "Toglie il flag cedibile (give/drop non lo toccano)." },
   { "nidentdb export <NomePg>", "CSV di tutti gli identify di un PG (file NomePg-gg-mm-aaaa-hh-mm-ss.csv)." },
   { "nidentdbreload", "Ricarica nebbie-ident-db.lua dalla cartella condivisa." },
   { "nknowdb [query]", "Cerca nell'archivio know monster condiviso (profiles/ndashboard)." },
@@ -3282,6 +3284,55 @@ function NebbieDash.patchCachedEqLocation(data, locationLabel, itemText)
   return true
 end
 
+-- Guard cambio arma / fame: evita che un "Smetti di usare <zaino>" in ritardo
+-- (dopo che _weaponSwapBusy e' gia' sceso) svuoti lo slot «sulla schiena»
+-- quando il wear e' gia' avvenuto o e' ancora in volo.
+function NebbieDash.beginWeaponSwapGuard(data)
+  NebbieDash._weaponSwapBusy = true
+  NebbieDash._weaponSwapGen = (NebbieDash._weaponSwapGen or 0) + 1
+  NebbieDash._weaponSwapBackItem = nil
+  if data and data.eqUpdated then
+    for _, row in ipairs(NebbieDash.buildEquipRows(data)) do
+      if not row.empty and row.location == "sulla schiena" then
+        NebbieDash._weaponSwapBackItem = row.item
+        break
+      end
+    end
+  end
+  return NebbieDash._weaponSwapGen
+end
+
+function NebbieDash.endWeaponSwapGuard(gen, restoreIfEmpty)
+  if gen and NebbieDash._weaponSwapGen ~= gen then return end
+  NebbieDash._weaponSwapBusy = false
+  local stash = NebbieDash._weaponSwapBackItem
+  NebbieDash._weaponSwapBackItem = nil
+  if not restoreIfEmpty or not stash or stash == "" then return end
+  local name = NebbieDash.currentChar
+  if not name then return end
+  local data = NebbieDash.getCharData(name)
+  if not data or not data.eqUpdated then return end
+  for _, row in ipairs(NebbieDash.buildEquipRows(data)) do
+    if not row.empty and row.location == "sulla schiena" then
+      return
+    end
+  end
+  NebbieDash.patchCachedEqLocation(data, "sulla schiena", stash)
+end
+
+function NebbieDash.shouldPreserveBackSlot(itemName)
+  if NebbieDash._hungerMacroBusy or NebbieDash._weaponSwapBusy then
+    return true
+  end
+  local stash = NebbieDash._weaponSwapBackItem
+  if stash and stash ~= "" and itemName and itemName ~= "" then
+    if NebbieDash.eqItemNamesMatch(stash, itemName) then
+      return true
+    end
+  end
+  return false
+end
+
 function NebbieDash.onStopUsingLine()
   local text = line or (type(getCurrentLine) == "function" and getCurrentLine()) or ""
   local itemName = text:match("^Smetti di usare (.+)%.%s*$")
@@ -3301,10 +3352,9 @@ function NebbieDash.onStopUsingLine()
   for _, row in ipairs(NebbieDash.buildEquipRows(data)) do
     if not row.empty and row.location == "sulla schiena" then
       if NebbieDash.eqItemNamesMatch(row.item, itemName) then
-        -- Durante la macro fame/sete il gioco manda "Smetti di usare …" per `rem`
-        -- zaino: svuotare la cache qui fa perdere {zaino} al giro successivo se
-        -- il testo sulle spalle dopo `wear` non matcha piu' l'override keyword.
-        if not NebbieDash._hungerMacroBusy and not NebbieDash._weaponSwapBusy then
+        -- Durante usa/fame il rem zaino non deve lasciare lo slot vuoto: il wear
+        -- ripristina, e un rem in ritardo dopo il wear non deve ri-svuotare.
+        if not NebbieDash.shouldPreserveBackSlot(itemName) then
           NebbieDash.patchCachedEqLocation(data, "sulla schiena", nil)
         end
         return
@@ -3322,6 +3372,10 @@ function NebbieDash.onWearBackLine()
   local data = NebbieDash.getCharData(name)
   if not data.eqUpdated then return end
   NebbieDash.patchCachedEqLocation(data, "sulla schiena", itemName)
+  if NebbieDash._weaponSwapBusy then
+    NebbieDash._weaponSwapBackItem = itemName
+    NebbieDash.endWeaponSwapGuard(NebbieDash._weaponSwapGen, false)
+  end
 end
 
 function NebbieDash.onWieldLine()
@@ -3396,6 +3450,14 @@ function NebbieDash.identDbPath()
   return NebbieDash.configPath("nebbie-ident-db.lua")
 end
 
+function NebbieDash.migrateIdentCedibileFlags()
+  for _, entry in pairs((NebbieDash.identDb and NebbieDash.identDb.entries) or {}) do
+    if entry.cedibile == nil and not entry.cedibileManual then
+      NebbieDash.applyCedibileFromFlags(entry, entry.flags)
+    end
+  end
+end
+
 function NebbieDash.loadIdentDb()
   NebbieDash.ensureConfigDir()
   NebbieDash.identDb = NebbieDash.identDb or { entries = {} }
@@ -3407,6 +3469,7 @@ function NebbieDash.loadIdentDb()
     if ok and type(loaded.entries) == "table" then
       NebbieDash.identDb = loaded
       NebbieDash.identDb.entries = NebbieDash.identDb.entries or {}
+      NebbieDash.migrateIdentCedibileFlags()
     elseif ok and type(loaded) == "table" and loaded.objectName then
       -- file corrotto/parziale: ignora
     end
@@ -3627,9 +3690,36 @@ function NebbieDash.upsertIdentRecord(parsed, character, source)
     from = existing.possession and existing.possession.character,
     displaySeen = existing.possession and existing.possession.displaySeen,
   }
+  NebbieDash.applyCedibileFromFlags(existing, existing.flags)
   NebbieDash.identDb.entries[key] = existing
   NebbieDash.scheduleIdentDbSave()
   return existing
+end
+
+-- PROCAREA-REWARD → cedibile automatico (inventario trasferibile). Override
+-- manuale con nidentdb cedibile / noncedibile (cedibileManual).
+function NebbieDash.flagsHaveProcareReward(flags)
+  return (flags or ""):upper():find("PROCAREA%-REWARD", 1, false) ~= nil
+end
+
+function NebbieDash.applyCedibileFromFlags(entry, flags)
+  if not entry then return end
+  if entry.cedibileManual then return end
+  entry.cedibile = NebbieDash.flagsHaveProcareReward(flags) and true or false
+end
+
+function NebbieDash.setIdentCedibile(entry, cedibile, manual)
+  if not entry then return nil end
+  entry.cedibile = cedibile and true or false
+  if manual then
+    entry.cedibileManual = true
+  end
+  NebbieDash.scheduleIdentDbSave()
+  return entry
+end
+
+function NebbieDash.isIdentEntryCedibile(entry)
+  return entry and entry.cedibile == true
 end
 
 -- Normalizza il nome oggetto da messaggi give/drop (articoli, dall'/dell', …)
@@ -3643,6 +3733,8 @@ function NebbieDash.normalizeIdentItemText(text)
   text = text:gsub("^gli%s+", ""):gsub("^le%s+", ""):gsub("^i%s+", "")
   text = text:gsub("dall'", " "):gsub("dell'", " "):gsub("all'", " "):gsub("nell'", " ")
   text = text:gsub("%sdal%s+", " "):gsub("%sdel%s+", " "):gsub("%sal%s+", " ")
+  text = text:gsub("%sdei%s+", " "):gsub("%sdegli%s+", " "):gsub("%sdelle%s+", " ")
+  text = text:gsub("%sdi%s+", " "):gsub("%sda%s+", " ")
   text = text:gsub("%s+", " ")
   return text:match("^%s*(.-)%s*$") or ""
 end
@@ -3655,6 +3747,12 @@ function NebbieDash.identTokenSet(text)
   return set
 end
 
+function NebbieDash.identTokenCount(set)
+  local n = 0
+  for _ in pairs(set or {}) do n = n + 1 end
+  return n
+end
+
 function NebbieDash.identTokenOverlapScore(a, b)
   local sa, sb = NebbieDash.identTokenSet(a), NebbieDash.identTokenSet(b)
   local n = 0
@@ -3664,23 +3762,74 @@ function NebbieDash.identTokenOverlapScore(a, b)
   return n
 end
 
+-- Score stretto: niente match su un solo token generico (es. "anello" →
+-- "anello varco…"). Richiede copertura alta sul set piu' corto.
+function NebbieDash.identMatchQuality(itemText, entryName)
+  local needle = NebbieDash.normalizeIdentItemText(itemText)
+  local hay = NebbieDash.normalizeIdentItemText(entryName)
+  if needle == "" or hay == "" then return 0 end
+  if needle == hay then return 100 end
+  local sa, sb = NebbieDash.identTokenSet(needle), NebbieDash.identTokenSet(hay)
+  local na, nb = NebbieDash.identTokenCount(sa), NebbieDash.identTokenCount(sb)
+  if na == 0 or nb == 0 then return 0 end
+  local score = 0
+  for w, _ in pairs(sa) do
+    if sb[w] then score = score + 1 end
+  end
+  if score == 0 then return 0 end
+  -- Un solo token nel messaggio: accetta solo se anche l'entry e' mono-token
+  -- e coincide (altrimenti "anello" agganciava pezzi lunghi omonimi).
+  if na == 1 then
+    if nb == 1 and score == 1 then return score end
+    return 0
+  end
+  local shorter = math.min(na, nb)
+  local need = math.max(2, math.ceil(shorter * 0.75))
+  if score < need then return 0 end
+  return score
+end
+
 -- Trova la migliore entry in archivio per un testo give/drop/eq.
-function NebbieDash.matchIdentEntryByItemText(itemText)
+-- opts.onlyCedibile: solo entry marcate cedibili (give/drop automatici).
+-- opts.preferChar: preferisci possesso di quel PG in caso di parita'.
+function NebbieDash.matchIdentEntryByItemText(itemText, opts)
+  opts = opts or {}
   local needle = NebbieDash.normalizeIdentItemText(itemText)
   if needle == "" then return nil, 0 end
-  local best, bestScore = nil, 0
+  local preferChar = opts.preferChar and tostring(opts.preferChar):lower() or nil
+  local best, bestScore, secondScore = nil, 0, 0
   for _, entry in pairs((NebbieDash.identDb and NebbieDash.identDb.entries) or {}) do
-    local score = NebbieDash.identTokenOverlapScore(needle, entry.objectName or "")
-    if entry.possession and entry.possession.displaySeen then
-      local alt = NebbieDash.identTokenOverlapScore(needle, entry.possession.displaySeen)
-      if alt > score then score = alt end
-    end
-    if score > bestScore then
-      best, bestScore = entry, score
+    if opts.onlyCedibile and not NebbieDash.isIdentEntryCedibile(entry) then
+      -- skip non cedibili
+    else
+      local score = NebbieDash.identMatchQuality(needle, entry.objectName or "")
+      if entry.possession and entry.possession.displaySeen then
+        local alt = NebbieDash.identMatchQuality(needle, entry.possession.displaySeen)
+        if alt > score then score = alt end
+      end
+      if score > 0 then
+        local preferBoost = 0
+        if preferChar and entry.possession and entry.possession.status == "held"
+            and entry.possession.character
+            and tostring(entry.possession.character):lower() == preferChar then
+          preferBoost = 0.5
+        end
+        local effective = score + preferBoost
+        if effective > bestScore then
+          secondScore = bestScore
+          best, bestScore = entry, effective
+        elseif effective > secondScore then
+          secondScore = effective
+        end
+      end
     end
   end
   if bestScore < 1 then return nil, 0 end
-  return best, bestScore
+  -- Ambiguita': due entry con score quasi uguale → non aggiornare in automatico.
+  if secondScore > 0 and (bestScore - secondScore) < 0.6 then
+    return nil, 0
+  end
+  return best, math.floor(bestScore)
 end
 
 function NebbieDash.setIdentPossession(entry, status, character, via, displaySeen, fromChar)
@@ -3722,7 +3871,10 @@ function NebbieDash.onIdentGiveLine()
   local text = line or (type(getCurrentLine) == "function" and getCurrentLine()) or ""
   local parsed = NebbieDash.parseGiveLine(text)
   if not parsed then return end
-  local entry = select(1, NebbieDash.matchIdentEntryByItemText(parsed.item))
+  local entry = select(1, NebbieDash.matchIdentEntryByItemText(parsed.item, {
+    onlyCedibile = true,
+    preferChar = NebbieDash.currentChar,
+  }))
   if not entry then return end
   local fromChar = NebbieDash.currentChar or (entry.possession and entry.possession.character)
   NebbieDash.setIdentPossession(entry, "held", parsed.target, "give", parsed.item, fromChar)
@@ -3735,7 +3887,10 @@ function NebbieDash.onIdentDropLine()
   local text = line or (type(getCurrentLine) == "function" and getCurrentLine()) or ""
   local parsed = NebbieDash.parseDropLine(text)
   if not parsed then return end
-  local entry = select(1, NebbieDash.matchIdentEntryByItemText(parsed.item))
+  local entry = select(1, NebbieDash.matchIdentEntryByItemText(parsed.item, {
+    onlyCedibile = true,
+    preferChar = NebbieDash.currentChar,
+  }))
   if not entry then return end
   local fromChar = NebbieDash.currentChar or (entry.possession and entry.possession.character)
   NebbieDash.setIdentPossession(entry, "ground", nil, "drop", parsed.item, fromChar)
@@ -4032,6 +4187,11 @@ function NebbieDash.formatIdentDbEntry(entry, withHolders)
     head = head .. " vnumOrig=" .. tostring(entry.vnumOriginario)
   end
   if entry.rare then head = head .. " <orange>[RARO]" end
+  if entry.cedibile then
+    head = head .. " <green>[cedibile]"
+  elseif entry.cedibileManual then
+    head = head .. " <grey>[non cedibile]"
+  end
   table.insert(lines, head)
   if entry.flags and entry.flags ~= "" then
     table.insert(lines, "  <grey>flags:<white> " .. entry.flags)
@@ -4115,6 +4275,8 @@ function NebbieDash.formatIdentEntryCsvRow(entry)
     entry.damageDice or "",
     entry.damageType or "",
     affects,
+    entry.cedibile and "1" or "0",
+    entry.cedibileManual and "1" or "0",
     entry.lastCharacter or "",
     entry.lastSource or "",
     entry.lastAt and os.date("%Y-%m-%d %H:%M:%S", entry.lastAt) or "",
@@ -4127,9 +4289,44 @@ end
 NebbieDash.IDENT_CSV_HEADER = {
   "key", "objectName", "objectType", "flags", "vnumOriginario",
   "weight", "value", "rent", "rare", "acApply", "damageDice", "damageType",
-  "affects", "lastCharacter", "lastSource", "lastAt",
+  "affects", "cedibile", "cedibileManual",
+  "lastCharacter", "lastSource", "lastAt",
   "possessionStatus", "possessionCharacter", "possessionVia",
 }
+
+function NebbieDash.cmdIdentDbSetCedibile(query, cedibile)
+  query = (query or ""):match("^%s*(.-)%s*$") or ""
+  if query == "" then
+    cecho("<orange>[NebbieDash] Uso: <yellow>nidentdb "
+      .. (cedibile and "cedibile" or "noncedibile") .. " <oggetto>\n")
+    return
+  end
+  local results = NebbieDash.searchIdentDb(query)
+  if not results or #results == 0 then
+    local entry = select(1, NebbieDash.matchIdentEntryByItemText(query))
+    if entry then results = { entry } end
+  end
+  if not results or #results == 0 then
+    cecho("<orange>[NebbieDash] Nessun identify per <white>" .. query .. "\n")
+    return
+  end
+  if #results > 1 then
+    cecho("<orange>[NebbieDash] Query ambigua (" .. tostring(#results)
+      .. " entry). Specifica meglio il nome.\n")
+    for i, entry in ipairs(results) do
+      if i > 8 then break end
+      cecho(string.format("  <grey>%s<white> %s\n",
+        entry.key or "?", entry.objectName or "?"))
+    end
+    return
+  end
+  local entry = results[1]
+  NebbieDash.setIdentCedibile(entry, cedibile, true)
+  cecho(string.format(
+    "<green>[NebbieDash] Ident: <white>%s<green> ora %s.\n",
+    entry.objectName or entry.key or "?",
+    cedibile and "cedibile (give/drop tracciati)" or "non cedibile"))
+end
 
 function NebbieDash.exportIdentDbCsvForCharacter(charName)
   charName = (charName or ""):match("^%s*(.-)%s*$") or ""
@@ -4183,7 +4380,9 @@ function NebbieDash.cmdIdentDb(argStr)
       "<green> oggetti in <white>" .. NebbieDash.identDbPath() .. "\n")
     cecho("<grey>Uso: <yellow>nidentdb <query><grey> | <yellow>nidentdb where <query><grey> | <yellow>nidentdb char <nome>\n")
     cecho("<grey>     <yellow>nidentdb hold <NomePg><grey> | <yellow>nidentdb hold <oggetto> <NomePg>\n")
+    cecho("<grey>     <yellow>nidentdb cedibile <oggetto><grey> | <yellow>nidentdb noncedibile <oggetto>\n")
     cecho("<grey>     <yellow>nidentdb export <NomePg><grey> | <yellow>nidentdbreload\n")
+    cecho("<grey>Give/drop aggiornano solo oggetti <white>cedibili<grey> (auto con PROCAREA-REWARD).\n")
     cecho("<grey>Stesso nome + stesse stats/affects = aggiorna; stats diverse = nuova entry #2/#3…\n")
     return
   end
@@ -4196,6 +4395,15 @@ function NebbieDash.cmdIdentDb(argStr)
     else
       NebbieDash.cmdIdentDbHold(rest)
     end
+    return
+  end
+
+  if mode == "cedibile" then
+    NebbieDash.cmdIdentDbSetCedibile(rest, true)
+    return
+  end
+  if mode == "noncedibile" then
+    NebbieDash.cmdIdentDbSetCedibile(rest, false)
     return
   end
 
@@ -5239,10 +5447,13 @@ function NebbieDash.runWeaponSwap(target)
     end
     return false
   end
-  NebbieDash._weaponSwapBusy = true
+  local gen = NebbieDash.beginWeaponSwapGuard(data)
   NebbieDash.runCommandSequence(steps, NebbieDash.weaponSwapDelay)
-  tempTimer(NebbieDash.weaponSwapDelay * #steps + 0.25, function()
-    NebbieDash._weaponSwapBusy = false
+  -- Timeout generoso: le risposte MUD (soprattutto rem/wear zaino) possono
+  -- arrivare dopo l'ultimo send; altrimenti un rem in ritardo svuota la schiena.
+  local timeout = (NebbieDash.weaponSwapDelay or 0.5) * #steps + 4.0
+  tempTimer(timeout, function()
+    NebbieDash.endWeaponSwapGuard(gen, true)
   end)
   return true
 end
