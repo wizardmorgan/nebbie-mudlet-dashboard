@@ -1,9 +1,16 @@
 # CHANGELOG — nebbie-complete-dashboard-package
 
+## 1.15.54 — 2026-11-08
+
+- **URL download**: canonico su **jsDelivr**
+  (`cdn.jsdelivr.net/gh/wizardmorgan/nebbie-mudlet-dashboard@main/...mpackage`).
+  `raw.githubusercontent.com` serviva ancora il `.mpackage` 1.15.51 dopo il push 1.15.53
+  (CDN, anche con `?cb=`).
+
 ## 1.15.53 — 2026-11-08
 
 - **`npackageupdate` ripristinato**: scarica/reinstalla da
-  `wizardmorgan/nebbie-mudlet-dashboard` `main` (URL raw `.mpackage` + cache-bust).
+  `wizardmorgan/nebbie-mudlet-dashboard` `main` (+ cache-bust).
   Alias `npackageupdate` / `npackageupdate force|forza`.
 - Chiarito: la tab **Aggiornamenti** di Alt+O non elenca i package installati da URL
   GitHub (solo mpkg ufficiale); usare `npackageupdate` o **Installa da URL**.

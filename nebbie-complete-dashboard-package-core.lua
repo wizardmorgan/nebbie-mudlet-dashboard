@@ -9,11 +9,14 @@
 -- docs/mudlet/analysis/RECOMMENDATION.md. Pattern prompt/eq basati su dati reali
 -- forniti dall'utente (docs/mudlet/analysis/Q&A.md, Round 3).
 
-local PKG_VER = "1.15.53"
+local PKG_VER = "1.15.54"
+-- jsDelivr: raw.githubusercontent.com tiene spesso in cache .mpackage vecchi
+-- (osservato: main serviva ancora 1.15.51 dopo push 1.15.53). Commit-pin
+-- tramite @main su jsDelivr e' allineato al tip di GitHub.
 local PKG_MPACKAGE_URL =
-  "https://raw.githubusercontent.com/wizardmorgan/nebbie-mudlet-dashboard/main/nebbie-complete-dashboard-package.mpackage"
+  "https://cdn.jsdelivr.net/gh/wizardmorgan/nebbie-mudlet-dashboard@main/nebbie-complete-dashboard-package.mpackage"
 local PKG_CORE_RAW_URL =
-  "https://raw.githubusercontent.com/wizardmorgan/nebbie-mudlet-dashboard/main/nebbie-complete-dashboard-package-core.lua"
+  "https://cdn.jsdelivr.net/gh/wizardmorgan/nebbie-mudlet-dashboard@main/nebbie-complete-dashboard-package-core.lua"
 
 local _prevPkgVer = NebbieDash and NebbieDash._loadedVer
 -- Non uscire in anticipo dal chunk core (alias/trigger del package possono essere

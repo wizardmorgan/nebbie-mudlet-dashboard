@@ -1161,7 +1161,7 @@ end
 if type(NebbieDash.isValidMpackageInstallUrl) == "function" then
   check("package update: isValidMpackageInstallUrl",
     NebbieDash.isValidMpackageInstallUrl(
-      "https://raw.githubusercontent.com/wizardmorgan/nebbie-mudlet-dashboard/main/nebbie-complete-dashboard-package.mpackage")
+      "https://cdn.jsdelivr.net/gh/wizardmorgan/nebbie-mudlet-dashboard@main/nebbie-complete-dashboard-package.mpackage")
     and not NebbieDash.isValidMpackageInstallUrl(
       "https://example.com/foo.mpackage?cb=1"))
 else

@@ -17,11 +17,12 @@ segue la stessa versione dello script).
 1. **In gioco — `npackageupdate`** (metodo consigliato da **1.15.53**): scarica il `.mpackage`
    da GitHub raw (cache-bust) e lo reinstalla. Opzionale: `npackageupdate force`.
 2. **Package Manager (Alt+O) → Installa da URL** — incolla:
-   `https://raw.githubusercontent.com/wizardmorgan/nebbie-mudlet-dashboard/main/nebbie-complete-dashboard-package.mpackage`
+   `https://cdn.jsdelivr.net/gh/wizardmorgan/nebbie-mudlet-dashboard@main/nebbie-complete-dashboard-package.mpackage`
    Oppure trascina quel link sul profilo Mudlet (Mudlet 4.11+). Il campo `website` nel
    `config.lua` del package punta a questo URL (utile a Mudlet / documentazione); **non**
    fa comparire il package nella tab **Aggiornamenti** (quella elenca solo il repository
-   ufficiale mpkg di Mudlet).
+   ufficiale mpkg di Mudlet). Preferire jsDelivr: `raw.githubusercontent.com` può
+   servire a lungo un `.mpackage` precedente dalla CDN.
 3. **In gioco (GMCP, opzionale)**: se il server Nebbie invia `Client.GUI` (URL + versione)
    al login, Mudlet può offrire il download quando la versione installata è più vecchia.
    Oggi il server non lo fa ancora: serve lavoro lato VPS/`myst`.

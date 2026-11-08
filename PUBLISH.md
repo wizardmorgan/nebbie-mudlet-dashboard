@@ -2,7 +2,10 @@
 
 **URL installazione Mudlet (unico canonico):**
 
-`https://raw.githubusercontent.com/wizardmorgan/nebbie-mudlet-dashboard/main/nebbie-complete-dashboard-package.mpackage`
+`https://cdn.jsdelivr.net/gh/wizardmorgan/nebbie-mudlet-dashboard@main/nebbie-complete-dashboard-package.mpackage`
+
+(Alternativa GitHub raw, a volte in cache:  
+`https://raw.githubusercontent.com/wizardmorgan/nebbie-mudlet-dashboard/main/nebbie-complete-dashboard-package.mpackage`)
 
 ## Da questo repository
 
