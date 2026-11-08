@@ -1,5 +1,12 @@
 # CHANGELOG — nebbie-complete-dashboard-package
 
+## 1.15.58 — 2026-11-08
+
+- **Know monster highlight**: evidenzia livello (`N^`), riga suscettibile (giallo su
+  rosso), resistente, immune; riepilogo `[Know]` a fine cast.
+- Se un tipo è sia immune sia resistente, in archivio/riepilogo resta solo **immune**.
+- Parser: tollera `HOLD .` / `POISON .` e ignora token tipo `+4`.
+
 ## 1.15.57 — 2026-11-08
 
 - **Highlight `<impugnato>`**: colora solo la stringa `<impugnato>`, non il nome arma.

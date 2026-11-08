@@ -9,7 +9,7 @@
 -- docs/mudlet/analysis/RECOMMENDATION.md. Pattern prompt/eq basati su dati reali
 -- forniti dall'utente (docs/mudlet/analysis/Q&A.md, Round 3).
 
-local PKG_VER = "1.15.57"
+local PKG_VER = "1.15.58"
 -- jsDelivr: raw.githubusercontent.com tiene spesso in cache .mpackage vecchi
 -- (osservato: main serviva ancora 1.15.51 dopo push 1.15.53). Commit-pin
 -- tramite @main su jsDelivr e' allineato al tip di GitHub.
@@ -4217,9 +4217,39 @@ end
 function NebbieDash.splitKnowBitList(text)
   local out = {}
   for token in (text or ""):gmatch("%S+") do
-    table.insert(out, token)
+    -- "HOLD ." / "POISON ." → togli punteggiatura; ignora solo "." o "+4" isolati
+    -- (modificatori numerici non sono tipi immunità).
+    token = token:gsub("[%.%,%;%:]+$", "")
+    if token ~= "" and not token:match("^[%+%-]?%d+$") then
+      table.insert(out, token)
+    end
   end
   return out
+end
+
+-- Se un tipo è sia immune sia resistente, vince immune: resta solo in immune.
+function NebbieDash.filterKnowResistantByImmune(resistant, immune)
+  if not resistant or #resistant == 0 then return resistant or {} end
+  if not immune or #immune == 0 then return resistant end
+  local immSet = {}
+  for _, t in ipairs(immune) do
+    immSet[(t or ""):upper()] = true
+  end
+  local out = {}
+  for _, t in ipairs(resistant) do
+    if not immSet[(t or ""):upper()] then
+      table.insert(out, t)
+    end
+  end
+  return out
+end
+
+function NebbieDash.applyKnowImmuneWins(entry)
+  if not entry then return entry end
+  if entry.resistant and entry.immune then
+    entry.resistant = NebbieDash.filterKnowResistantByImmune(entry.resistant, entry.immune)
+  end
+  return entry
 end
 
 -- Parser del blocco know monster (righe già senza colori ANSI Mudlet).
@@ -4307,7 +4337,7 @@ function NebbieDash.parseKnowMonsterFull(lines)
   end
   if not entry.monsterName or entry.monsterName == "" then return nil end
   if not entry.race or entry.race == "" then return nil end
-  return entry
+  return NebbieDash.applyKnowImmuneWins(entry)
 end
 
 function NebbieDash.upsertKnowRecord(parsed, character, source)
@@ -4333,6 +4363,7 @@ function NebbieDash.upsertKnowRecord(parsed, character, source)
   if parsed.immune ~= nil then existing.immune = parsed.immune end
   if parsed.attacks ~= nil then existing.attacks = parsed.attacks end
   if parsed.damageDice ~= nil then existing.damageDice = parsed.damageDice end
+  NebbieDash.applyKnowImmuneWins(existing)
   existing.lastAt = now
   existing.lastCharacter = character or existing.lastCharacter or "unknown"
   existing.lastSource = source or existing.lastSource
@@ -4441,6 +4472,70 @@ function NebbieDash.onKnowArchiveLine()
   end
 end
 
+function NebbieDash.echoKnowMonsterSummary(entry)
+  if not entry then return end
+  local name = entry.monsterName or "?"
+  if entry.warriorLevel ~= nil then
+    cecho(string.format(
+      "<yellow>[Know]<white> %s <grey>— livello ~<yellow>%d\n",
+      name, entry.warriorLevel))
+  else
+    cecho(string.format("<yellow>[Know]<white> %s\n", name))
+  end
+  if entry.susceptible and #entry.susceptible > 0 then
+    cecho("<yellow>[Know] <red>SUSCETTIBILE:<yellow> "
+      .. table.concat(entry.susceptible, " ") .. "\n")
+  end
+  if entry.immune and #entry.immune > 0 then
+    cecho("<yellow>[Know] <cyan>IMMUNE:<white> "
+      .. table.concat(entry.immune, " ") .. "\n")
+  end
+  if entry.resistant and #entry.resistant > 0 then
+    cecho("<yellow>[Know] <green>RESISTENTE:<white> "
+      .. table.concat(entry.resistant, " ")
+      .. " <grey>(esclusi tipi già immune)\n")
+  end
+end
+
+-- Evidenziazioni live sulle righe del cast know monster (text_highlights).
+function NebbieDash.onKnowHighlightLevelLine()
+  if NebbieDash.textHighlights == false then return end
+  local text = line or (type(getCurrentLine) == "function" and getCurrentLine()) or ""
+  text = NebbieDash.stripColors(text)
+  local lev = text:match("guerriero del (%d+)%^")
+  if not lev then return end
+  -- Solo "51^" (livello), non tutta la riga.
+  NebbieDash.hlColorSpan(lev .. "^", 255, 255, 0, 0, 0, 128)
+end
+
+function NebbieDash.onKnowHighlightSusceptibleLine()
+  if NebbieDash.textHighlights == false then return end
+  local text = line or (type(getCurrentLine) == "function" and getCurrentLine()) or ""
+  text = NebbieDash.stripColors(text)
+  local span = text:match("(e' suscettibile a .+)$")
+  if not span then return end
+  -- Molto evidente: giallo su rosso.
+  NebbieDash.hlColorSpan(span, 255, 255, 0, 180, 0, 0)
+end
+
+function NebbieDash.onKnowHighlightResistantLine()
+  if NebbieDash.textHighlights == false then return end
+  local text = line or (type(getCurrentLine) == "function" and getCurrentLine()) or ""
+  text = NebbieDash.stripColors(text)
+  local span = text:match("(e' resistente a .+)$")
+  if not span then return end
+  NebbieDash.hlColorSpan(span, 200, 255, 200, 0, 80, 0)
+end
+
+function NebbieDash.onKnowHighlightImmuneLine()
+  if NebbieDash.textHighlights == false then return end
+  local text = line or (type(getCurrentLine) == "function" and getCurrentLine()) or ""
+  text = NebbieDash.stripColors(text)
+  local span = text:match("(e' immune a .+)$")
+  if not span then return end
+  NebbieDash.hlColorSpan(span, 255, 255, 255, 0, 60, 160)
+end
+
 function NebbieDash.finishKnowArchiveCapture()
   local cap = NebbieDash._knowCapture
   NebbieDash._knowCapture = nil
@@ -4451,6 +4546,7 @@ function NebbieDash.finishKnowArchiveCapture()
   local parsed = NebbieDash.parseKnowMonsterFull(cap.lines)
   if not parsed then return end
   NebbieDash.upsertKnowRecord(parsed, cap.character, cap.source)
+  NebbieDash.echoKnowMonsterSummary(parsed)
 end
 
 function NebbieDash.knowDbEntryCount()
@@ -4507,13 +4603,14 @@ end
 
 function NebbieDash.formatKnowDbEntry(entry)
   if not entry then return {} end
+  local resistant = NebbieDash.filterKnowResistantByImmune(entry.resistant, entry.immune)
   local lines = {}
   table.insert(lines, string.format("<yellow>%s<white> — razza <cyan>%s",
     entry.monsterName or "?", entry.race or "?"))
-  local stats = {}
   if entry.warriorLevel ~= nil then
-    table.insert(stats, "liv~" .. tostring(entry.warriorLevel))
+    table.insert(lines, string.format("  <yellow>livello ~%d", entry.warriorLevel))
   end
+  local stats = {}
   if entry.exp ~= nil then table.insert(stats, "exp~" .. tostring(entry.exp)) end
   if entry.hits ~= nil then table.insert(stats, "hp~" .. tostring(entry.hits)) end
   if entry.attacks ~= nil then table.insert(stats, "att " .. tostring(entry.attacks)) end
@@ -4528,13 +4625,14 @@ function NebbieDash.formatKnowDbEntry(entry)
     table.insert(lines, "  <grey>odia classe:<white> " .. entry.hateClass)
   end
   if entry.susceptible and #entry.susceptible > 0 then
-    table.insert(lines, "  <grey>susc:<white> " .. table.concat(entry.susceptible, " "))
-  end
-  if entry.resistant and #entry.resistant > 0 then
-    table.insert(lines, "  <grey>resi:<white> " .. table.concat(entry.resistant, " "))
+    table.insert(lines, "  <red>SUSCETTIBILE:<yellow> "
+      .. table.concat(entry.susceptible, " "))
   end
   if entry.immune and #entry.immune > 0 then
-    table.insert(lines, "  <grey>imm:<white> " .. table.concat(entry.immune, " "))
+    table.insert(lines, "  <cyan>IMMUNE:<white> " .. table.concat(entry.immune, " "))
+  end
+  if resistant and #resistant > 0 then
+    table.insert(lines, "  <green>RESISTENTE:<white> " .. table.concat(resistant, " "))
   end
   local when = entry.lastAt and os.date("%Y-%m-%d %H:%M", entry.lastAt) or "?"
   local src = entry.lastSource and (" (" .. entry.lastSource .. ")") or ""
@@ -4872,6 +4970,15 @@ function NebbieDash.installTextHighlightTriggers()
   add(tempTrigger(
     "Qui non si riesce piu' a scavare, il filone sembra esaurito!",
     [[NebbieDash.onHighlightDigDone()]]))
+  -- Know monster: livello / susc / resi / immune (vedi echoKnowMonsterSummary).
+  add(tempTrigger("combatte piu' o meno come un guerriero del",
+    [[NebbieDash.onKnowHighlightLevelLine()]]))
+  add(tempTrigger("e' suscettibile a ",
+    [[NebbieDash.onKnowHighlightSusceptibleLine()]]))
+  add(tempTrigger("e' resistente a ",
+    [[NebbieDash.onKnowHighlightResistantLine()]]))
+  add(tempTrigger("e' immune a ",
+    [[NebbieDash.onKnowHighlightImmuneLine()]]))
 end
 
 function NebbieDash.resolveWeaponTargetFromArg(data, argStr)

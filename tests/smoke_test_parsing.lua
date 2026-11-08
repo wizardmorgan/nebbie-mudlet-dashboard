@@ -1456,6 +1456,45 @@ local orco = NebbieDash.knowDb.entries[NebbieDash.normalizeKnowMonsterKey("Un or
 check("knowdb: capture upsert orco", orco and orco.race == "Humanoid" and orco.exp == 5000)
 check("knowdb: capture source spell", orco and orco.lastSource == "spell")
 
+-- Dump reale utente (governante): immune vince su resistente per tipi comuni.
+local govLines = {
+  "La governante e' di razza Human.",
+  "La governante ha circa 218040 punti esperienza.",
+  "La governante combatte piu' o meno come un guerriero del 51^ livello.",
+  "Probabilmente La governante ha 1181 punti vita.",
+  "La governante e' resistente a FIRE COLD ELECTRICITY ENERGY HOLD .",
+  "La governante e' immune a FIRE ENERGY ACID SLEEP CHARM .",
+  "La governante ha circa 6.0 attacchi per turno.",
+  "Ognuno dei quali fa circa 9d9 punti di danno.",
+}
+local gov = NebbieDash.parseKnowMonsterFull(govLines)
+check("knowdb: governante livello 51", gov and gov.warriorLevel == 51)
+check("knowdb: governante immune include FIRE",
+  gov and gov.immune and table.concat(gov.immune, " "):find("FIRE", 1, true))
+local govResi = table.concat(gov and gov.resistant or {}, " ")
+check("knowdb: governante resi senza FIRE/ENERGY (immune vince)",
+  govResi:find("FIRE", 1, true) == nil and govResi:find("ENERGY", 1, true) == nil
+    and govResi:find("COLD", 1, true) ~= nil and govResi:find("HOLD", 1, true) ~= nil)
+
+local leoLines = {
+  "La leonessa madre e' di razza Carnivororous.",
+  "La leonessa madre ha circa 5432685 punti esperienza.",
+  "La leonessa madre combatte piu' o meno come un guerriero del 50^ livello.",
+  "Probabilmente La leonessa madre ha 1241 punti vita.",
+  "La leonessa madre e' suscettibile a ACID POISON .",
+  "La leonessa madre e' resistente a FIRE COLD ELECTRICITY ENERGY +4 .",
+  "La leonessa madre e' immune a BLUNT PIERCE SLASH DRAIN SLEEP CHARM .",
+  "La leonessa madre ha circa 5.0 attacchi per turno.",
+  "Ognuno dei quali fa circa 5d5 punti di danno.",
+}
+local leo = NebbieDash.parseKnowMonsterFull(leoLines)
+check("knowdb: leonessa suscettibile ACID POISON",
+  leo and leo.susceptible and leo.susceptible[1] == "ACID" and leo.susceptible[2] == "POISON")
+check("knowdb: leonessa +4 non finisce in resistente",
+  leo and leo.resistant
+    and table.concat(leo.resistant, " "):find("+4", 1, true) == nil
+    and table.concat(leo.resistant, " "):find("FIRE", 1, true) ~= nil)
+
 print("")
 if failures == 0 then
   print("TUTTI I TEST OK (" .. #eqLines .. " righe eq, " .. #attribLines .. " righe attrib)")
