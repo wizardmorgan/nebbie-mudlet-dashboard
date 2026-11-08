@@ -1,5 +1,10 @@
 # CHANGELOG — nebbie-complete-dashboard-package
 
+## 1.15.57 — 2026-11-08
+
+- **Highlight `<impugnato>`**: colora solo la stringa `<impugnato>`, non il nome arma.
+- **Autosplit**: non invia più `group` a ogni loot/cadavere; `split <importo>` diretto.
+
 ## 1.15.56 — 2026-11-08
 
 - **Identify omonimi**: stesso nome + stesse caratteristiche (tipo/flags/peso/valore/

@@ -9,7 +9,7 @@
 -- docs/mudlet/analysis/RECOMMENDATION.md. Pattern prompt/eq basati su dati reali
 -- forniti dall'utente (docs/mudlet/analysis/Q&A.md, Round 3).
 
-local PKG_VER = "1.15.56"
+local PKG_VER = "1.15.57"
 -- jsDelivr: raw.githubusercontent.com tiene spesso in cache .mpackage vecchi
 -- (osservato: main serviva ancora 1.15.51 dopo push 1.15.53). Commit-pin
 -- tramite @main su jsDelivr e' allineato al tip di GitHub.
@@ -4803,14 +4803,8 @@ end
 
 function NebbieDash.onHighlightWieldSlot()
   if NebbieDash.textHighlights == false then return end
-  local text = line or (type(getCurrentLine) == "function" and getCurrentLine()) or ""
-  text = NebbieDash.stripColors(text)
-  local span = text:match("(<impugnato>.*)$") or text:match("(<impugnato>)")
-  if span then
-    NebbieDash.hlColorSpan(span, 0, 0, 255, 0, 170, 0)
-  else
-    NebbieDash.hlColorWholeLine(0, 0, 255, 0, 170, 0)
-  end
+  -- Solo la stringa "<impugnato>", non il nome dell'arma a seguire.
+  NebbieDash.hlColorSpan("<impugnato>", 0, 0, 255, 0, 170, 0)
 end
 
 function NebbieDash.onHighlightHumber()
@@ -5583,18 +5577,15 @@ end
 -- base a un controllo in realta' scaduto. Si accumula semplicemente
 -- l'importo nel controllo gia' in corso: un solo controllo gruppo, un solo
 -- split (con la somma totale) quando arriva la risposta.
+-- Autosplit senza probe "group" (prima: a ogni cadavere/loot inviava group).
+-- Split diretto sull'importo; se non sei in gruppo il MUD risponde da solo.
 function NebbieDash.startSplitFlow(amount)
+  if not amount then return end
   if NebbieDash._groupCheckActive then
-    NebbieDash._pendingSplitAmount = (NebbieDash._pendingSplitAmount or 0) + amount
-    return
+    NebbieDash.finishSplitFlow(false)
   end
-  NebbieDash._pendingSplitAmount = amount
-  NebbieDash._groupCheckGen = (NebbieDash._groupCheckGen or 0) + 1
-  NebbieDash._groupCheckActive = true
-  if NebbieDash._groupSoloTrig then pcall(enableTrigger, NebbieDash._groupSoloTrig) end
-  if NebbieDash._groupHeaderTrig then pcall(enableTrigger, NebbieDash._groupHeaderTrig) end
-  NebbieDash.armSplitWatchdog(NebbieDash._groupCheckGen)
-  send("group", false)
+  send("split " .. tostring(amount), false)
+  cecho("<green>[NebbieDash] Split automatico: " .. amount .. " monete.\n")
 end
 
 function NebbieDash.finishSplitFlow(grouped)
