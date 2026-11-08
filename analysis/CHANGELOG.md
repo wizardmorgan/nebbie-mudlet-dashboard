@@ -1,5 +1,10 @@
 # CHANGELOG — nebbie-complete-dashboard-package
 
+## 1.15.61 — 2026-11-08
+
+- Docs/messaggi: **non esiste** “Installa da URL” in Package Manager. Istruzioni corrette:
+  `lua installPackage("…")` o drag-and-drop del link sul profilo.
+
 ## 1.15.60 — 2026-11-08
 
 - **npackageupdate**: non usa più solo jsDelivr `@main` (poteva restare stale, es.

@@ -8,8 +8,15 @@ URL canonico del pacchetto:
 
 `https://cdn.jsdelivr.net/gh/wizardmorgan/nebbie-mudlet-dashboard@main/nebbie-complete-dashboard-package.mpackage`
 
-In Mudlet: **Alt+O** → **Installa da URL** (il campo `website` del package punta a quell’URL).
-Aggiornamenti successivi: comando in gioco **`npackageupdate`** (la tab **Aggiornamenti** di Mudlet elenca solo il repo ufficiale mpkg, non i package da GitHub).
+In Mudlet, nella command line:
+
+```text
+lua installPackage("https://cdn.jsdelivr.net/gh/wizardmorgan/nebbie-mudlet-dashboard@main/nebbie-complete-dashboard-package.mpackage")
+```
+
+Oppure trascina il link `.mpackage` sul profilo (Mudlet 4.11+). **Non** esiste un bottone “Installa da URL” in Package Manager (Alt+O).
+
+Aggiornamenti successivi: **`npackageupdate`** in gioco.
 
 ## Sviluppo
 

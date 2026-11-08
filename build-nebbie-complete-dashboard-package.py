@@ -100,10 +100,9 @@ profilo Mudlet, più personaggi, cambio automatico rilevato dal prompt).
   funzionalità nuove non venivano attivati finché non si riavviava
   completamente Mudlet.
 - **Speedwalk**: sezioni collassabili; formati `(desc) dirs` e `dirs (desc)`; `nspeedwalks` diagnostico.
-- **Aggiornamento package**: comando **`npackageupdate`** (o **`npackageupdate force`**) scarica
-  il `.mpackage` da GitHub raw con cache-bust; Alt+O → **Installa da URL** (campo `website`).
-  La tab **Aggiornamenti** di Mudlet elenca solo il repo ufficiale mpkg — non i package da URL.
-  Opzionale (server): GMCP `Client.GUI` al login.
+- **Aggiornamento package**: comando **`npackageupdate`** (risolve SHA tip di `main`).
+  Manuale: `lua installPackage("…mpackage")` o drag-and-drop del link sul profilo
+  (non c’è un bottone “Installa da URL” in Alt+O).
 - **Cambio arma**: alias **`usa <parola-chiave>`** (sequenza borsa come
   nebbie-play-all; keyword da equip/`identify`/`nebbie-item-keywords.txt`).
   Il vecchio pannello "Armi" è stato rimosso (equip a tutta altezza).
