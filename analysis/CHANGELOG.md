@@ -1,5 +1,13 @@
 # CHANGELOG — nebbie-complete-dashboard-package
 
+## 1.15.56 — 2026-11-08
+
+- **Identify omonimi**: stesso nome + stesse caratteristiche (tipo/flags/peso/valore/
+  rent/AC/dado/affects/…) → aggiorna la stessa entry; caratteristiche diverse →
+  nuova entry con suffisso `#2`, `#3`, …
+- **`nidentdb export <NomePg>`**: CSV di tutti gli identify del PG in
+  `profiles/ndashboard/<NomePg>-gg-mm-aaaa-hh-mm-ss.csv`.
+
 ## 1.15.55 — 2026-11-08
 
 - **Archivio know monster** (`nknowdb` / `nknowdb race` / `nknowdbreload`): cattura il

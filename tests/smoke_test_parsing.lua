@@ -1316,6 +1316,49 @@ check("identdb: hold assegna Mirari",
 check("identdb: listIdentDbByCharacter su possesso Mirari",
   #NebbieDash.listIdentDbByCharacter("Mirari") >= 1)
 
+-- Stesso nome, affects diverse → entry #2; stesso nome+stats → upsert
+local mantelloAlt = NebbieDash.parseIdentifyFull({
+  "Oggetto: 'mantello varco ombra profonda', Tipo di Oggetto ARMOR",
+  "L'oggetto e': RESISTANT ONLY-PRINCE PROCAREA-REWARD",
+  "Peso: 9, Valore: 3500, Costo di rent: 0",
+  "AC-apply di 6.",
+  "    Ti puo' dare : SPELLPOWER by 2",
+  "    Ti puo' dare : SAVING_ALL by -3",
+  "    Ti puo' dare : HITROLL by 1",
+  "    Ti puo' dare : MANA-REGEN by 22",
+  "    Ti puo' dare : MANA by 60",
+})
+local altSaved = NebbieDash.upsertIdentRecord(mantelloAlt, "Mirari", "spell")
+check("identdb: stesso nome affects diverse → #2",
+  altSaved and altSaved.key == "mantello varco ombra profonda#2"
+    and NebbieDash.identDbEntryCount() == 2)
+local sameAgain = NebbieDash.upsertIdentRecord(mantelloAlt, "Mirari", "spell")
+check("identdb: stesso nome+stats → riusa #2",
+  sameAgain and sameAgain.key == "mantello varco ombra profonda#2"
+    and NebbieDash.identDbEntryCount() == 2)
+local origAgain = NebbieDash.upsertIdentRecord(mantello, "NomiyaMaki", "scroll")
+check("identdb: stats originali → riusa chiave senza #",
+  origAgain and origAgain.key == "mantello varco ombra profonda"
+    and NebbieDash.identDbEntryCount() == 2)
+
+-- Export CSV per PG
+local exportPath = NebbieDash.exportIdentDbCsvForCharacter("Mirari")
+check("identdb: export path non-nil", type(exportPath) == "string" and exportPath ~= "")
+check("identdb: export filename ha timestamp gg-mm-aaaa-hh-mm-ss",
+  exportPath and exportPath:match("Mirari%-%d%d%-%d%d%-%d%d%d%d%-%d%d%-%d%d%-%d%d%.csv$") ~= nil)
+if exportPath then
+  local ef = io.open(exportPath, "r")
+  local econtent = ef and ef:read("*a") or ""
+  if ef then ef:close() end
+  check("identdb: export CSV ha header key", econtent:find("key,objectName", 1, true) ~= nil)
+  check("identdb: export CSV contiene #2 o mantello",
+    econtent:find("mantello varco ombra profonda", 1, true) ~= nil)
+  pcall(os.remove, exportPath)
+else
+  check("identdb: export CSV ha header key", false)
+  check("identdb: export CSV contiene #2 o mantello", false)
+end
+
 -- Evidenziazioni testo (v1.15.52, portate da dadomud)
 check("highlight: lista gemme contiene spinello blu",
   (function()

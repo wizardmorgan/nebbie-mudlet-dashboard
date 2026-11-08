@@ -94,6 +94,7 @@ Nessun alias invia comandi al MUD in automatico all'avvio (scelta deliberata, ve
 | `nidentdb hold <NomePg>` | Dopo un `drop`: assegna l’oggetto lasciato in terra a un PG. |
 | `nidentdb hold <oggetto> <NomePg>` | Assegna possesso senza drop pendente. |
 | `nidentdbreload` | Ricarica l’archivio identify dal disco. |
+| `nidentdb export <NomePg>` | Esporta in CSV tutti gli identify di quel PG (`NomePg-gg-mm-aaaa-hh-mm-ss.csv`). |
 | `nknowdb [query]` | Cerca nell’archivio **know monster** condiviso (`nebbie-know-db.lua`). |
 | `nknowdb race <razza>` | Filtra per razza. |
 | `nknowdbreload` | Ricarica l’archivio know monster dal disco. |
@@ -134,8 +135,12 @@ nidentdb where mantello
 nidentdb char NomiyaMaki
 nidentdb hold Sirio
 nidentdb hold mantello Mirari
+nidentdb export Mirari
 nidentdbreload
 ```
+
+Stesso nome oggetto ma **caratteristiche diverse** (affects, AC, flags, …) → entry separate
+con suffisso `#2`, `#3`, …; stesso nome **e** stesse stats → aggiorna l’entry esistente.
 
 `where` mostra anche il possesso tracciato e l’incrocio con la cache equip (serve aver fatto
 `nresync`/`neq` sui PG rilevanti).

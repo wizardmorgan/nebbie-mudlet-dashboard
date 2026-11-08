@@ -9,7 +9,7 @@
 -- docs/mudlet/analysis/RECOMMENDATION.md. Pattern prompt/eq basati su dati reali
 -- forniti dall'utente (docs/mudlet/analysis/Q&A.md, Round 3).
 
-local PKG_VER = "1.15.55"
+local PKG_VER = "1.15.56"
 -- jsDelivr: raw.githubusercontent.com tiene spesso in cache .mpackage vecchi
 -- (osservato: main serviva ancora 1.15.51 dopo push 1.15.53). Commit-pin
 -- tramite @main su jsDelivr e' allineato al tip di GitHub.
@@ -2426,6 +2426,7 @@ NebbieDash.HELP_TEXT = {
   { "nidentdb char <nome>", "Identify / possesso di quel personaggio." },
   { "nidentdb hold <NomePg>", "Dopo un drop: assegna l'oggetto a terra a un PG." },
   { "nidentdb hold <ogg> <Pg>", "Assegna possesso identify a un PG (senza drop pendente)." },
+  { "nidentdb export <NomePg>", "CSV di tutti gli identify di un PG (file NomePg-gg-mm-aaaa-hh-mm-ss.csv)." },
   { "nidentdbreload", "Ricarica nebbie-ident-db.lua dalla cartella condivisa." },
   { "nknowdb [query]", "Cerca nell'archivio know monster condiviso (profiles/ndashboard)." },
   { "nknowdb race <razza>", "Elenca mostri per razza (es. nknowdb race Goblinoid)." },
@@ -3359,6 +3360,78 @@ function NebbieDash.normalizeIdentObjectKey(name)
   return ((name or ""):lower():match("^%s*(.-)%s*$")) or ""
 end
 
+-- Chiave archivio senza suffisso #N (es. "mantello ...#2" → "mantello ...").
+function NebbieDash.identBaseKeyFromKey(key)
+  key = NebbieDash.normalizeIdentObjectKey(key)
+  return (key:match("^(.-)#%d+$")) or key
+end
+
+function NebbieDash.identAffectsSignature(affects)
+  local parts = {}
+  for _, a in ipairs(affects or {}) do
+    local t = (a or ""):lower():match("^%s*(.-)%s*$") or ""
+    if t ~= "" then table.insert(parts, t) end
+  end
+  table.sort(parts)
+  return table.concat(parts, " | ")
+end
+
+-- Firma delle caratteristiche immagazzinate: stesso nome + stessa firma = stesso
+-- pezzo (upsert). Stesso nome + firma diversa = nuova entry con suffisso #2, #3…
+function NebbieDash.identStatsSignature(entry)
+  if not entry then return "" end
+  local function n(v)
+    if v == nil then return "" end
+    return tostring(v)
+  end
+  return table.concat({
+    n(entry.objectType):lower(),
+    n(entry.flags):lower(),
+    n(entry.vnumOriginario),
+    n(entry.weight),
+    n(entry.value),
+    n(entry.rent),
+    entry.rare and "1" or "0",
+    n(entry.acApply),
+    n(entry.damageDice):lower(),
+    n(entry.damageType):lower(),
+    NebbieDash.identAffectsSignature(entry.affects),
+  }, "\n")
+end
+
+function NebbieDash.identStatsEqual(a, b)
+  return NebbieDash.identStatsSignature(a) == NebbieDash.identStatsSignature(b)
+end
+
+-- Cerca entry con stesso nome oggetto e stesse caratteristiche; altrimenti nil.
+function NebbieDash.findIdentEntryMatchingStats(parsed)
+  if not parsed or not parsed.objectName then return nil, nil end
+  local base = NebbieDash.normalizeIdentObjectKey(parsed.objectName)
+  if base == "" then return nil, nil end
+  for key, entry in pairs((NebbieDash.identDb and NebbieDash.identDb.entries) or {}) do
+    local entryBase = entry.baseKey
+      or NebbieDash.identBaseKeyFromKey(key)
+      or NebbieDash.normalizeIdentObjectKey(entry.objectName)
+    if entryBase == base and NebbieDash.identStatsEqual(entry, parsed) then
+      return key, entry
+    end
+  end
+  return nil, nil
+end
+
+-- Alloca chiave: nome normalizzato, oppure nome#2, nome#3… se già preso da
+-- un pezzo con caratteristiche diverse.
+function NebbieDash.allocIdentDbKey(baseKey)
+  baseKey = NebbieDash.normalizeIdentObjectKey(baseKey)
+  local entries = (NebbieDash.identDb and NebbieDash.identDb.entries) or {}
+  if not entries[baseKey] then return baseKey end
+  local n = 2
+  while entries[baseKey .. "#" .. n] do
+    n = n + 1
+  end
+  return baseKey .. "#" .. n
+end
+
 -- Parser completo del blocco identify (spell o pergamena). Accetta sia il
 -- formato mortale (senza V-Number) sia quello immortale/batch.
 function NebbieDash.parseIdentifyFull(lines)
@@ -3429,13 +3502,18 @@ end
 
 function NebbieDash.upsertIdentRecord(parsed, character, source)
   if not parsed or not parsed.objectName then return nil end
-  local key = NebbieDash.normalizeIdentObjectKey(parsed.objectName)
-  if key == "" then return nil end
+  local baseKey = NebbieDash.normalizeIdentObjectKey(parsed.objectName)
+  if baseKey == "" then return nil end
   NebbieDash.identDb = NebbieDash.identDb or { entries = {} }
   NebbieDash.identDb.entries = NebbieDash.identDb.entries or {}
   local now = os.time()
-  local existing = NebbieDash.identDb.entries[key] or {}
+  local key, existing = NebbieDash.findIdentEntryMatchingStats(parsed)
+  if not key then
+    key = NebbieDash.allocIdentDbKey(baseKey)
+    existing = {}
+  end
   existing.key = key
+  existing.baseKey = baseKey
   existing.objectName = parsed.objectName
   existing.objectType = parsed.objectType
   existing.flags = parsed.flags
@@ -3448,6 +3526,7 @@ function NebbieDash.upsertIdentRecord(parsed, character, source)
   existing.damageDice = parsed.damageDice
   existing.damageType = parsed.damageType
   existing.affects = parsed.affects or {}
+  existing.statsSig = NebbieDash.identStatsSignature(parsed)
   existing.lastAt = now
   existing.lastCharacter = character or existing.lastCharacter or "unknown"
   existing.lastSource = source or existing.lastSource
@@ -3861,8 +3940,12 @@ end
 function NebbieDash.formatIdentDbEntry(entry, withHolders)
   if not entry then return {} end
   local lines = {}
+  local variant = (entry.key or ""):match("#(%d+)$")
   local head = string.format("<yellow>%s<white> (%s)",
     entry.objectName or "?", entry.objectType or "?")
+  if variant then
+    head = head .. string.format(" <orange>#%s<white>", variant)
+  end
   if entry.vnumOriginario then
     head = head .. " vnumOrig=" .. tostring(entry.vnumOriginario)
   end
@@ -3918,6 +4001,92 @@ function NebbieDash.formatIdentDbEntry(entry, withHolders)
   return lines
 end
 
+function NebbieDash.csvEscapeField(value)
+  local s = tostring(value == nil and "" or value)
+  if s:find('[,"\r\n]', 1) then
+    return '"' .. s:gsub('"', '""') .. '"'
+  end
+  return s
+end
+
+function NebbieDash.identExportCsvPath(charName)
+  local safe = (charName or "unknown"):gsub("[^%w%-_]", "_")
+  if safe == "" then safe = "unknown" end
+  local stamp = os.date("%d-%m-%Y-%H-%M-%S")
+  return NebbieDash.configPath(safe .. "-" .. stamp .. ".csv")
+end
+
+function NebbieDash.formatIdentEntryCsvRow(entry)
+  local affects = table.concat(entry.affects or {}, " | ")
+  local poss = entry.possession or {}
+  return {
+    entry.key or "",
+    entry.objectName or "",
+    entry.objectType or "",
+    entry.flags or "",
+    entry.vnumOriginario or "",
+    entry.weight ~= nil and tostring(entry.weight) or "",
+    entry.value ~= nil and tostring(entry.value) or "",
+    entry.rent ~= nil and tostring(entry.rent) or "",
+    entry.rare and "1" or "0",
+    entry.acApply ~= nil and tostring(entry.acApply) or "",
+    entry.damageDice or "",
+    entry.damageType or "",
+    affects,
+    entry.lastCharacter or "",
+    entry.lastSource or "",
+    entry.lastAt and os.date("%Y-%m-%d %H:%M:%S", entry.lastAt) or "",
+    poss.status or "",
+    poss.character or "",
+    poss.via or "",
+  }
+end
+
+NebbieDash.IDENT_CSV_HEADER = {
+  "key", "objectName", "objectType", "flags", "vnumOriginario",
+  "weight", "value", "rent", "rare", "acApply", "damageDice", "damageType",
+  "affects", "lastCharacter", "lastSource", "lastAt",
+  "possessionStatus", "possessionCharacter", "possessionVia",
+}
+
+function NebbieDash.exportIdentDbCsvForCharacter(charName)
+  charName = (charName or ""):match("^%s*(.-)%s*$") or ""
+  if charName == "" then
+    cecho("<orange>[NebbieDash] Uso: <yellow>nidentdb export <NomePg>\n")
+    return nil
+  end
+  local results = NebbieDash.listIdentDbByCharacter(charName)
+  if not results or #results == 0 then
+    cecho("<orange>[NebbieDash] Nessun identify in archivio per PG <white>" .. charName .. "\n")
+    return nil
+  end
+  NebbieDash.ensureConfigDir()
+  local path = NebbieDash.identExportCsvPath(charName)
+  local f, err = io.open(path, "w")
+  if not f then
+    cecho("<red>[NebbieDash] Impossibile scrivere CSV: <white>" .. tostring(err) .. "\n")
+    return nil
+  end
+  local header = {}
+  for _, col in ipairs(NebbieDash.IDENT_CSV_HEADER) do
+    table.insert(header, NebbieDash.csvEscapeField(col))
+  end
+  f:write(table.concat(header, ",") .. "\n")
+  for _, entry in ipairs(results) do
+    local cols = NebbieDash.formatIdentEntryCsvRow(entry)
+    local row = {}
+    for _, c in ipairs(cols) do
+      table.insert(row, NebbieDash.csvEscapeField(c))
+    end
+    f:write(table.concat(row, ",") .. "\n")
+  end
+  f:close()
+  cecho(string.format(
+    "<green>[NebbieDash] Export identify: <white>%d<green> righe → <yellow>%s\n",
+    #results, path))
+  return path
+end
+
 function NebbieDash.cmdIdentDb(argStr)
   argStr = (argStr or ""):match("^%s*(.-)%s*$") or ""
   local mode, rest = argStr:match("^(%S+)%s+(.-)%s*$")
@@ -3931,8 +4100,9 @@ function NebbieDash.cmdIdentDb(argStr)
       tostring(NebbieDash.identDbEntryCount()) ..
       "<green> oggetti in <white>" .. NebbieDash.identDbPath() .. "\n")
     cecho("<grey>Uso: <yellow>nidentdb <query><grey> | <yellow>nidentdb where <query><grey> | <yellow>nidentdb char <nome>\n")
-    cecho("<grey>     <yellow>nidentdb hold <NomePg><grey> | <yellow>nidentdb hold <oggetto> <NomePg><grey> | <yellow>nidentdbreload\n")
-    cecho("<grey>Identify automatico; give trasferisce possesso; drop → terra poi hold.\n")
+    cecho("<grey>     <yellow>nidentdb hold <NomePg><grey> | <yellow>nidentdb hold <oggetto> <NomePg>\n")
+    cecho("<grey>     <yellow>nidentdb export <NomePg><grey> | <yellow>nidentdbreload\n")
+    cecho("<grey>Stesso nome + stesse stats/affects = aggiorna; stats diverse = nuova entry #2/#3…\n")
     return
   end
 
@@ -3944,6 +4114,11 @@ function NebbieDash.cmdIdentDb(argStr)
     else
       NebbieDash.cmdIdentDbHold(rest)
     end
+    return
+  end
+
+  if mode == "export" then
+    NebbieDash.exportIdentDbCsvForCharacter(rest)
     return
   end
 
