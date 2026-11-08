@@ -874,10 +874,10 @@ check("armi: rem zaino durante usa NON svuota schiena",
     and schienaDuring.item == "Borsa Inesauribile dei Korred")
 line = "Ti metti Borsa Inesauribile dei Korred sulle spalle."
 NebbieDash.onWearBackLine()
-check("armi: wear zaino chiude guard swap", NebbieDash._weaponSwapBusy == false)
--- Simula rem in ritardo dopo che busy e' gia' false ma stash ancora rilevante:
-NebbieDash._weaponSwapBackItem = "Borsa Inesauribile dei Korred"
-NebbieDash._weaponSwapBusy = false
+check("armi: wear zaino chiude busy ma tiene stash",
+  NebbieDash._weaponSwapBusy == false
+    and NebbieDash._weaponSwapBackItem == "Borsa Inesauribile dei Korred")
+-- Rem in ritardo DOPO wear: non reiniettare lo stash (bug reale se end(false) lo azzera).
 line = "Smetti di usare Borsa Inesauribile dei Korred."
 NebbieDash.onStopUsingLine()
 local schienaLate = nil
@@ -885,8 +885,35 @@ for _, row in ipairs(NebbieDash.buildEquipRows(swapData)) do
   if row.location == "sulla schiena" then schienaLate = row end
 end
 check("armi: rem zaino in ritardo NON svuota schiena",
-  schienaLate and not schienaLate.empty)
+  schienaLate and not schienaLate.empty
+    and schienaLate.item == "Borsa Inesauribile dei Korred")
 NebbieDash.endWeaponSwapGuard(swapGen, true)
+check("armi: timeout restore consuma stash", NebbieDash._weaponSwapBackItem == nil)
+check("armi: schiena piena dopo timeout", (function()
+  for _, row in ipairs(NebbieDash.buildEquipRows(swapData)) do
+    if row.location == "sulla schiena" then
+      return not row.empty and row.item == "Borsa Inesauribile dei Korred"
+    end
+  end
+  return false
+end)())
+-- Se uno svuotamento forzato lascia schiena vuota prima del timeout, restore ripristina.
+local swapData2 = NebbieDash.getCharData("NomiyaMaki")
+swapData2.eq = {
+  [16] = { location = "impugnato", item = "La Flamberga di Boris" },
+  [17] = { location = "sulla schiena", item = "Borsa Inesauribile dei Korred" },
+}
+swapData2.eqUpdated = os.time()
+local swapGen2 = NebbieDash.beginWeaponSwapGuard(swapData2)
+NebbieDash.patchCachedEqLocation(swapData2, "sulla schiena", nil)
+NebbieDash.endWeaponSwapGuard(swapGen2, true)
+local schienaRestored = nil
+for _, row in ipairs(NebbieDash.buildEquipRows(swapData2)) do
+  if row.location == "sulla schiena" then schienaRestored = row end
+end
+check("armi: endWeaponSwapGuard restore riempie schiena vuota",
+  schienaRestored and not schienaRestored.empty
+    and schienaRestored.item == "Borsa Inesauribile dei Korred")
 NebbieDash._weaponSwapBackItem = nil
 NebbieDash._weaponSwapBusy = false
 

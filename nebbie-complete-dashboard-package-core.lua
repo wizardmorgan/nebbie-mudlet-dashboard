@@ -9,7 +9,7 @@
 -- docs/mudlet/analysis/RECOMMENDATION.md. Pattern prompt/eq basati su dati reali
 -- forniti dall'utente (docs/mudlet/analysis/Q&A.md, Round 3).
 
-local PKG_VER = "1.15.63"
+local PKG_VER = "1.15.64"
 local PKG_REPO = "wizardmorgan/nebbie-mudlet-dashboard"
 local PKG_FILE = "nebbie-complete-dashboard-package.mpackage"
 -- @main su jsDelivr puo' restare stale (osservato: restava 1.15.56 mentre tip
@@ -3648,10 +3648,14 @@ end
 
 function NebbieDash.endWeaponSwapGuard(gen, restoreIfEmpty)
   if gen and NebbieDash._weaponSwapGen ~= gen then return end
+  -- Chiude busy subito (nuovo `usa` permesso), ma lo stash resta finche'
+  -- restoreIfEmpty=true: altrimenti onWearBackLine → end(..., false) azzera lo
+  -- stash e un "Smetti di usare" in ritardo svuota «sulla schiena».
   NebbieDash._weaponSwapBusy = false
+  if not restoreIfEmpty then return end
   local stash = NebbieDash._weaponSwapBackItem
   NebbieDash._weaponSwapBackItem = nil
-  if not restoreIfEmpty or not stash or stash == "" then return end
+  if not stash or stash == "" then return end
   local name = NebbieDash.currentChar
   if not name then return end
   local data = NebbieDash.getCharData(name)

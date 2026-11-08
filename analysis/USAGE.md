@@ -204,8 +204,9 @@ attuale → `wield` → `wear` zaino. Parole chiave: override in `nebbie-item-ke
 presente, altrimenti euristica. Se non impugni nulla, salta a `get`+`wield`. Se l'arma
 richiesta è già quella impugnata, non invia nulla.
 
-Dalla **1.15.62** lo slot «sulla schiena» non resta vuoto se il messaggio `Smetti di usare`
-dello zaino arriva in ritardo rispetto al `wear` (stash + restore; non serve `eq` a ogni `usa`).
+Dalla **1.15.62** (corretto in **1.15.64**) lo slot «sulla schiena» non resta vuoto se il
+messaggio `Smetti di usare` dello zaino arriva in ritardo rispetto al `wear` (stash tenuto
+dopo la fine di busy fino al timeout restore; non serve `eq` a ogni `usa`).
 
 ## Cartella config (`profiles/ndashboard`)
 

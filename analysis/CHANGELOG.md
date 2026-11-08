@@ -1,5 +1,12 @@
 # CHANGELOG — nebbie-complete-dashboard-package
 
+## 1.15.64 — 2026-11-08
+
+- **usa / slot schiena**: `onWearBackLine` chiudeva il guard con
+  `endWeaponSwapGuard(false)` azzerando lo stash; un `Smetti di usare` zaino in
+  ritardo svuotava «sulla schiena» e il timeout non poteva ripristinare. Ora
+  `end(..., false)` spegne solo busy e lascia lo stash fino al restore del timeout.
+
 ## 1.15.63 — 2026-11-08
 
 - **Finestra floating chat** (`nchat`): raccoglie say, gt/gtell, tell, whisper,
