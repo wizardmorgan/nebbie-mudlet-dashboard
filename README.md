@@ -8,7 +8,8 @@ URL canonico del pacchetto:
 
 `https://raw.githubusercontent.com/wizardmorgan/nebbie-mudlet-dashboard/main/nebbie-complete-dashboard-package.mpackage`
 
-In Mudlet: **Alt+O** → installa o aggiorna da URL (serve il campo `website` nel package dopo la prima installazione da quell’URL).
+In Mudlet: **Alt+O** → **Installa da URL** (il campo `website` del package punta a quell’URL).
+Aggiornamenti successivi: comando in gioco **`npackageupdate`** (la tab **Aggiornamenti** di Mudlet elenca solo il repo ufficiale mpkg, non i package da GitHub).
 
 ## Sviluppo
 

@@ -1,5 +1,14 @@
 # CHANGELOG — nebbie-complete-dashboard-package
 
+## 1.15.53 — 2026-11-08
+
+- **`npackageupdate` ripristinato**: scarica/reinstalla da
+  `wizardmorgan/nebbie-mudlet-dashboard` `main` (URL raw `.mpackage` + cache-bust).
+  Alias `npackageupdate` / `npackageupdate force|forza`.
+- Chiarito: la tab **Aggiornamenti** di Alt+O non elenca i package installati da URL
+  GitHub (solo mpkg ufficiale); usare `npackageupdate` o **Installa da URL**.
+- URL package allineato al repo personale (non nebbietest).
+
 ## 1.15.52 — 2026-11-08
 
 - **Evidenziazioni testo** (da dadomud): gemme (colore + `[descrizione]`), metalli/minerali

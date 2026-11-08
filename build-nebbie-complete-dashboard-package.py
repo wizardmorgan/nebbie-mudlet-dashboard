@@ -100,8 +100,10 @@ profilo Mudlet, più personaggi, cambio automatico rilevato dal prompt).
   funzionalità nuove non venivano attivati finché non si riavviava
   completamente Mudlet.
 - **Speedwalk**: sezioni collassabili; formati `(desc) dirs` e `dirs (desc)`; `nspeedwalks` diagnostico.
-- **Aggiornamento package**: Gestione pacchetti Mudlet (**Alt+O**) — campo `website` nel package
-  (URL .mpackage); oppure GMCP `Client.GUI` al login (versione server = config.lua).
+- **Aggiornamento package**: comando **`npackageupdate`** (o **`npackageupdate force`**) scarica
+  il `.mpackage` da GitHub raw con cache-bust; Alt+O → **Installa da URL** (campo `website`).
+  La tab **Aggiornamenti** di Mudlet elenca solo il repo ufficiale mpkg — non i package da URL.
+  Opzionale (server): GMCP `Client.GUI` al login.
 - **Cambio arma**: alias **`usa <parola-chiave>`** (sequenza borsa come
   nebbie-play-all; keyword da equip/`identify`/`nebbie-item-keywords.txt`).
   Il vecchio pannello "Armi" è stato rimosso (equip a tutta altezza).
@@ -206,6 +208,8 @@ ALIASES = [
     ("nebbie-dash-ident-db", "^nidentdb$", "NebbieDash.cmdIdentDb(\"\")"),
     ("nebbie-dash-ident-db-args", "^nidentdb (.+)$", "NebbieDash.cmdIdentDb(matches[2])"),
     ("nebbie-dash-ident-db-reload", "^nidentdbreload$", "NebbieDash.cmdReloadIdentDb()"),
+    ("nebbie-dash-package-update", "^npackageupdate(?: (force|forza))?$",
+     "NebbieDash.cmdPackageUpdate(matches[2])"),
 ]
 
 

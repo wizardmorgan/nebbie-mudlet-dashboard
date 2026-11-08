@@ -14,15 +14,17 @@ segue la stessa versione dello script).
 
 ### Installazione / aggiornamento
 
-1. **Package Manager (Alt+O)** — metodo principale da **1.15.40**:
-   - Seleziona `nebbie-complete-dashboard-package` nell’elenco.
-   - Se Mudlet mostra **Aggiorna**, usalo (legge l’URL dal campo `website` nel `config.lua` del package).
-   - Altrimenti: **Installa da URL** e incolla:
-     `https://raw.githubusercontent.com/wizardmorgan/nebbie-mudlet-dashboard/main/nebbie-complete-dashboard-package.mpackage`
-   - Oppure trascina quel link sul profilo Mudlet (Mudlet 4.11+).
-   - Stesso nome package = upgrade senza disinstallare manualmente (se Mudlet lo propone).
-2. **In gioco (GMCP)**: con GMCP attivo, al login il server invia `Client.GUI` (URL + versione);
-   Mudlet può offrire il download se la versione installata è più vecchia (server Nebbie aggiornato).
+1. **In gioco — `npackageupdate`** (metodo consigliato da **1.15.53**): scarica il `.mpackage`
+   da GitHub raw (cache-bust) e lo reinstalla. Opzionale: `npackageupdate force`.
+2. **Package Manager (Alt+O) → Installa da URL** — incolla:
+   `https://raw.githubusercontent.com/wizardmorgan/nebbie-mudlet-dashboard/main/nebbie-complete-dashboard-package.mpackage`
+   Oppure trascina quel link sul profilo Mudlet (Mudlet 4.11+). Il campo `website` nel
+   `config.lua` del package punta a questo URL (utile a Mudlet / documentazione); **non**
+   fa comparire il package nella tab **Aggiornamenti** (quella elenca solo il repository
+   ufficiale mpkg di Mudlet).
+3. **In gioco (GMCP, opzionale)**: se il server Nebbie invia `Client.GUI` (URL + versione)
+   al login, Mudlet può offrire il download quando la versione installata è più vecchia.
+   Oggi il server non lo fa ancora: serve lavoro lato VPS/`myst`.
 
 Dopo ogni aggiornamento:
 
@@ -63,6 +65,7 @@ Nessun alias invia comandi al MUD in automatico all'avvio (scelta deliberata, ve
 | `nclanslot <on\|off>` | Mostra/nasconde il 22° slot equip placeholder "simbolo del clan" (nascosto di default, non ancora confermato in un `eq` reale). |
 | `nitemlen <numero>` | Cambia quanti caratteri della descrizione oggetto mostrare prima di troncare con "…" (10–300, default 42). Alzalo se preferisci vedere più testo (andrà più facilmente a capo), abbassalo per evitare il più possibile il word-wrap. |
 | `nfix` | Reinstalla trigger e GUI senza disinstallare il package (utile se qualcosa sembra "bloccato"). |
+| `npackageupdate` | Scarica e reinstalla il `.mpackage` da GitHub (`main`). Opzionale: `npackageupdate force`. |
 | `c <spell> [bersaglio]` | Invia `cast '<spell>' <bersaglio>` — **sempre con bersaglio** (default: PG attivo). Es. `c heal` → `cast 'heal' NomiyaMaki`; `c heal bob` → `cast 'heal' bob`. |
 | `r <spell> [bersaglio]` | Come sopra con `recall` (sorcerer). |
 | `m <spell> [bersaglio]` | Come sopra con `mind` (psionico). |
