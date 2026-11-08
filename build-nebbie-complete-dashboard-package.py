@@ -113,6 +113,8 @@ profilo Mudlet, più personaggi, cambio automatico rilevato dal prompt).
 - **Archivio identify** (`nidentdb`): salva in tempo reale ogni identify
   (spell/pergamena) in `nebbie-ident-db.lua` condiviso; cerca per nome e
   incrocia con l’equip in cache (`nidentdb where`).
+- **Evidenziazioni testo**: gemme/metalli + aura/disarm/sanc/dig/`<impugnato>`
+  (stile dadomud); `text_highlights` e suoni opzionali in `nebbie-dash-sounds.txt`.
 - **Corretto (bug al primo avvio dopo installazione pulita)**: poteva
   comparire l'errore `attempt to index global 'NebbieDash' (a nil value)`
   perché lo script agganciato a `sysLoadEvent` poteva eseguirsi prima dello

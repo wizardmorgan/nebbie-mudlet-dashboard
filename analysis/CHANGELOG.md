@@ -1,5 +1,12 @@
 # CHANGELOG — nebbie-complete-dashboard-package
 
+## 1.15.52 — 2026-11-08
+
+- **Evidenziazioni testo** (da dadomud): gemme (colore + `[descrizione]`), metalli/minerali
+  (solo colore); aura/RESANK, disarm altri, sanc warning/gone, `<impugnato>`, dig humber /
+  filone esaurito. Preferenza `text_highlights`; suoni opzionali in `nebbie-dash-sounds.txt`.
+- Nessuna automazione dig/swap armi di dadomud: solo highlight (+ suono se configurato).
+
 ## 1.15.51 — 2026-11-08
 
 - **Archivio identify condiviso**: ogni identify (spell o pergamena) viene salvato in tempo

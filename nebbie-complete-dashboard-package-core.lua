@@ -9,7 +9,7 @@
 -- docs/mudlet/analysis/RECOMMENDATION.md. Pattern prompt/eq basati su dati reali
 -- forniti dall'utente (docs/mudlet/analysis/Q&A.md, Round 3).
 
-local PKG_VER = "1.15.51"
+local PKG_VER = "1.15.52"
 
 local _prevPkgVer = NebbieDash and NebbieDash._loadedVer
 -- Non uscire in anticipo dal chunk core (alias/trigger del package possono essere
@@ -187,6 +187,7 @@ function NebbieDash.ensureDefaultConfigFiles()
   NebbieDash.ensureIdentBatchCommandsFile()
   NebbieDash.ensureBatchItemsFile()
   NebbieDash.ensurePreferencesFile()
+  NebbieDash.ensureSoundsFile()
 end
 
 function NebbieDash.preferencesPath()
@@ -206,9 +207,11 @@ function NebbieDash.ensurePreferencesFile()
     "# sidebar_mode = dock     # dock = bordo sinistro classico Mudlet\n" ..
     "# weapon_swap_delay = 0.5 # secondi tra i comandi di usa / cambio arma\n" ..
     "# sanity_neq_on_login = on  # se l'equip in cache è vuoto ma marcato sincronizzato, invia eq\n" ..
+    "# text_highlights = on      # gemme/metalli + evidenziazioni aura/disarm/dig/sanc\n" ..
     "sidebar_mode = dock\n" ..
     "weapon_swap_delay = 0.5\n" ..
-    "sanity_neq_on_login = on\n"
+    "sanity_neq_on_login = on\n" ..
+    "text_highlights = on\n"
   )
   f:close()
 end
@@ -224,28 +227,34 @@ function NebbieDash.loadPreferences()
     sidebar_mode = "dock",
     weapon_swap_delay = 0.5,
     sanity_neq_on_login = true,
+    text_highlights = true,
   }
   local path = NebbieDash.preferencesPath()
-  if type(io.exists) ~= "function" or not io.exists(path) then return end
-  local f = io.open(path, "r")
-  if not f then return end
-  for line in f:lines() do
-    local key, val = line:match("^%s*([%w_]+)%s*=%s*(.+)%s*$")
-    if key and val and not key:match("^#") then
-      val = val:gsub("%s*#.*$", ""):match("^%s*(.-)%s*$")
-      if key == "sidebar_mode" and (val == "float" or val == "dock") then
-        NebbieDash.prefs.sidebar_mode = val
-      elseif key == "weapon_swap_delay" then
-        local n = tonumber(val)
-        if n and n >= 0.1 and n <= 3 then NebbieDash.prefs.weapon_swap_delay = n end
-      elseif key == "sanity_neq_on_login" then
-        NebbieDash.prefs.sanity_neq_on_login = NebbieDash.parsePreferencesBool(val)
+  if type(io.exists) == "function" and io.exists(path) then
+    local f = io.open(path, "r")
+    if f then
+      for line in f:lines() do
+        local key, val = line:match("^%s*([%w_]+)%s*=%s*(.+)%s*$")
+        if key and val and not key:match("^#") then
+          val = val:gsub("%s*#.*$", ""):match("^%s*(.-)%s*$")
+          if key == "sidebar_mode" and (val == "float" or val == "dock") then
+            NebbieDash.prefs.sidebar_mode = val
+          elseif key == "weapon_swap_delay" then
+            local n = tonumber(val)
+            if n and n >= 0.1 and n <= 3 then NebbieDash.prefs.weapon_swap_delay = n end
+          elseif key == "sanity_neq_on_login" then
+            NebbieDash.prefs.sanity_neq_on_login = NebbieDash.parsePreferencesBool(val)
+          elseif key == "text_highlights" then
+            NebbieDash.prefs.text_highlights = NebbieDash.parsePreferencesBool(val)
+          end
+        end
       end
+      f:close()
     end
   end
-  f:close()
   NebbieDash.sidebarMode = NebbieDash.prefs.sidebar_mode
   NebbieDash.weaponSwapDelay = NebbieDash.prefs.weapon_swap_delay or NebbieDash.weaponSwapDelay
+  NebbieDash.textHighlights = NebbieDash.prefs.text_highlights ~= false
 end
 
 function NebbieDash.savePreferencesFile()
@@ -257,7 +266,8 @@ function NebbieDash.savePreferencesFile()
     "# NebbieDash — preferenze (npreferencesreload)\n" ..
     "sidebar_mode = " .. tostring(NebbieDash.sidebarMode or NebbieDash.prefs.sidebar_mode or "float") .. "\n" ..
     "weapon_swap_delay = " .. tostring(NebbieDash.weaponSwapDelay or 0.5) .. "\n" ..
-    "sanity_neq_on_login = " .. ((NebbieDash.prefs and NebbieDash.prefs.sanity_neq_on_login) and "on" or "off") .. "\n"
+    "sanity_neq_on_login = " .. ((NebbieDash.prefs and NebbieDash.prefs.sanity_neq_on_login) and "on" or "off") .. "\n" ..
+    "text_highlights = " .. ((NebbieDash.prefs and NebbieDash.prefs.text_highlights ~= false) and "on" or "off") .. "\n"
   )
   f:close()
 end
@@ -2147,7 +2157,7 @@ NebbieDash.HELP_TEXT = {
   { "nfont <6-24>", "Imposta la dimensione del font dei pannelli." },
   { "nwidth [auto|<px>]", "Larghezza colonna Equip+Speedwalk (dock o float); default auto." },
   { "nsidebar dock", "Layout bordo sinistro (unico supportato); rimuove eventuali pannelli float residui + nfix." },
-  { "npreferencesreload", "Ricarica nebbie-dash-preferences.txt (delay usa, sanity eq, sidebar)." },
+  { "npreferencesreload", "Ricarica preferenze + suoni highlight; reinstalla evidenziazioni testo." },
   { "nheights <10-90>|auto", "Altezza Equip vs Speedwalk: auto = proporzione al testo; o % Equip manuale." },
   { "usa <parola-chiave>", "Cambio arma da zaino (rem/get/wield — come nebbie-play-all)." },
   { "nconfigdir", "Mostra cartella profiles/ndashboard e file indice nebbie-dash-config-root.txt." },
@@ -2345,10 +2355,13 @@ end
 
 function NebbieDash.cmdReloadPreferences()
   NebbieDash.loadPreferences()
+  NebbieDash.loadSoundsConfig()
   NebbieDash.weaponSwapDelay = NebbieDash.prefs.weapon_swap_delay or NebbieDash.weaponSwapDelay
+  NebbieDash.installTextHighlightTriggers()
   cecho("<green>[NebbieDash] Preferenze ricaricate da <white>" .. NebbieDash.preferencesPath() ..
     "<green> (sidebar=" .. tostring(NebbieDash.effectiveSidebarMode()) ..
-    ", weapon_swap_delay=" .. tostring(NebbieDash.weaponSwapDelay) .. ").\n")
+    ", weapon_swap_delay=" .. tostring(NebbieDash.weaponSwapDelay) ..
+    ", text_highlights=" .. ((NebbieDash.textHighlights ~= false) and "on" or "off") .. ").\n")
 end
 
 function NebbieDash.cmdSetSidebar(modeStr)
@@ -3725,6 +3738,296 @@ function NebbieDash.cmdReloadIdentDb()
   cecho("<green>[NebbieDash] Ident DB ricaricato: <white>" ..
     tostring(NebbieDash.identDbEntryCount()) ..
     "<green> oggetti (<white>" .. NebbieDash.identDbPath() .. "<green>).\n")
+end
+
+-- ---------------------------------------------------------------------------
+-- Evidenziazioni testo (portate da dadomud): gemme/metalli + allarmi combat/dig.
+-- Solo colore / testo aggiuntivo / suono opzionale — nessuna automazione dig.
+-- Preferenza: text_highlights = on|off. Suoni: nebbie-dash-sounds.txt
+-- ---------------------------------------------------------------------------
+NebbieDash.textHighlights = true
+
+-- Liste da AutoColor_Gemme / AutoColor_Metalli (dadomud).
+NebbieDash.AUTO_COLOR_GEMS = {
+  { pattern = "Una pietra di rubino",       r = 255, g = 45,  b = 85,  descrizione = "WP: Burn Hands | EQ: Resi Fire" },
+  { pattern = "Una pietra di zaffiro",      r = 46,  g = 95,  b = 255, descrizione = "WP: Chill | EQ: Resi cold" },
+  { pattern = "Una pietra di ametista",     r = 178, g = 102, b = 255, descrizione = "WP: Magic Miss | EQ: Resi Energy" },
+  { pattern = "Una pietra di granato",      r = 192, g = 41,  b = 60,  descrizione = "WP: +1 Hit&Dam | EQ: AC -10" },
+  { pattern = "Una pietra di smeraldo",     r = 46,  g = 204, b = 113, descrizione = "WP: Acid | EQ: Resi Acid" },
+  { pattern = "Una pietra d'opale",         r = 232, g = 232, b = 245, descrizione = "Scrying (x2)" },
+  { pattern = "Una pietra di topazio",      r = 255, g = 179, b = 0,   descrizione = "WP: Shock. Grasp | EQ: Resi Elec" },
+  { pattern = "Una pietra di diamante",     r = 255, g = 255, b = 255, descrizione = "Artifact" },
+  { pattern = "Una pietra di agata",        r = 210, g = 105, b = 30,  descrizione = "WP: Poison | EQ: Immu Poison" },
+  { pattern = "Una pietra di lapislazzuli", r = 76,  g = 111, b = 255, descrizione = "+5 Mana Reg" },
+  { pattern = "Una pietra di spinello blu", r = 76,  g = 111, b = 255, descrizione = "-2 SF" },
+}
+
+NebbieDash.AUTO_COLOR_METALS = {
+  { pattern = "Una pepita di rame",      r = 200, g = 113, b = 55  },
+  { pattern = "Una pepita di stagno",    r = 191, g = 196, b = 201 },
+  { pattern = "Una pepita di mithril",   r = 174, g = 238, b = 238 },
+  { pattern = "Una pepita di platino",   r = 229, g = 228, b = 226 },
+  { pattern = "Una pepita d'adamantite", r = 138, g = 43,  b = 226 },
+  { pattern = "Una pepita d'oro",        r = 255, g = 215, b = 0   },
+  { pattern = "Una pepita di piombo",    r = 92,  g = 98,  b = 112 },
+  { pattern = "Del minerale ferroso",    r = 183, g = 65,  b = 14  },
+  { pattern = "Una pietra di carbone",   r = 110, g = 110, b = 110 },
+}
+
+function NebbieDash.soundsPath()
+  return NebbieDash.configPath("nebbie-dash-sounds.txt")
+end
+
+function NebbieDash.ensureSoundsFile()
+  local path = NebbieDash.soundsPath()
+  if type(io.exists) == "function" and io.exists(path) then return end
+  NebbieDash.ensureConfigDir()
+  local f = io.open(path, "w")
+  if not f then return end
+  f:write(
+    "# NebbieDash — percorsi suono opzionali (vuoto = silenzioso)\n" ..
+    "# Dopo modifiche: npreferencesreload oppure ntriggers\n" ..
+    "# Esempio Windows: C:/Users/tu/.config/mudlet/profiles/ndashboard/sounds/humber.mp3\n" ..
+    "humber =\n" ..
+    "dig_done =\n" ..
+    "sanc_gone =\n" ..
+    "aura_loss =\n"
+  )
+  f:close()
+end
+
+function NebbieDash.loadSoundsConfig()
+  NebbieDash.migrateConfigFileIfNeeded("nebbie-dash-sounds.txt")
+  NebbieDash.ensureSoundsFile()
+  NebbieDash.sounds = NebbieDash.sounds or {
+    humber = "",
+    dig_done = "",
+    sanc_gone = "",
+    aura_loss = "",
+  }
+  local path = NebbieDash.soundsPath()
+  if type(io.exists) ~= "function" or not io.exists(path) then return end
+  local f = io.open(path, "r")
+  if not f then return end
+  for line in f:lines() do
+    local key, val = line:match("^%s*([%w_]+)%s*=%s*(.-)%s*$")
+    if key and not key:match("^#") then
+      val = (val or ""):gsub("%s*#.*$", ""):match("^%s*(.-)%s*$") or ""
+      if NebbieDash.sounds[key] ~= nil then
+        NebbieDash.sounds[key] = val
+      end
+    end
+  end
+  f:close()
+end
+
+function NebbieDash.playHighlightSound(key)
+  local path = NebbieDash.sounds and NebbieDash.sounds[key]
+  if not path or path == "" then return end
+  if type(io.exists) == "function" and not io.exists(path) then return end
+  if type(playSoundFile) == "function" then
+    pcall(playSoundFile, path)
+  end
+end
+
+function NebbieDash.hlColorSpan(text, r, g, b, br, bg, bb)
+  if type(selectString) ~= "function" or not text or text == "" then return end
+  selectString(text, 1)
+  if type(setFgColor) == "function" then setFgColor(r, g, b) end
+  if br and type(setBgColor) == "function" then setBgColor(br, bg, bb) end
+  if type(resetFormat) == "function" then resetFormat() end
+end
+
+function NebbieDash.hlColorWholeLine(r, g, b, br, bg, bb)
+  local text = line or (type(getCurrentLine) == "function" and getCurrentLine()) or ""
+  text = NebbieDash.stripColors(text)
+  if text == "" then return end
+  NebbieDash.hlColorSpan(text, r, g, b, br, bg, bb)
+end
+
+function NebbieDash.onAutoColorGem(pattern, r, g, b, descrizione)
+  if NebbieDash.textHighlights == false then return end
+  local text = line or (type(getCurrentLine) == "function" and getCurrentLine()) or ""
+  local needle = pattern
+  if type(selectString) == "function" then
+    local ok = selectString(needle, 1)
+    if ok == false or ok == 0 then
+      -- fallback: prova a colorare comunque la riga se contiene il pattern
+      if not text:find(needle, 1, true) then return end
+      selectString(needle, 1)
+    end
+    if type(setFgColor) == "function" then setFgColor(r, g, b) end
+    if type(resetFormat) == "function" then resetFormat() end
+  end
+  if descrizione and descrizione ~= "" and type(decho) == "function" then
+    decho("<128,128,128> [" .. descrizione .. "]")
+  end
+end
+
+function NebbieDash.onAutoColorMetal(pattern, r, g, b)
+  if NebbieDash.textHighlights == false then return end
+  if type(selectString) == "function" then
+    selectString(pattern, 1)
+    if type(setFgColor) == "function" then setFgColor(r, g, b) end
+    if type(resetFormat) == "function" then resetFormat() end
+  end
+end
+
+function NebbieDash.onHighlightPerditaAura()
+  if NebbieDash.textHighlights == false then return end
+  local text = line or (type(getCurrentLine) == "function" and getCurrentLine()) or ""
+  text = NebbieDash.stripColors(text)
+  local nome = text:match("^L'aura bianca che avvolgeva il corpo di (.+) si spegne%.%s*$")
+  if not nome then return end
+  NebbieDash.hlColorSpan(text, 255, 255, 0)
+  NebbieDash.hlColorSpan(nome, 255, 0, 0, 255, 255, 0)
+  if type(echo) == "function" then
+    echo("\n")
+    if type(setFgColor) == "function" then setFgColor(255, 0, 0) end
+    if type(setBgColor) == "function" then setBgColor(255, 255, 0) end
+    echo("RESANK " .. nome .. "\n")
+    if type(resetFormat) == "function" then resetFormat() end
+  end
+  NebbieDash.playHighlightSound("aura_loss")
+end
+
+function NebbieDash.onHighlightPerditaAuraDispel()
+  if NebbieDash.textHighlights == false then return end
+  local text = line or (type(getCurrentLine) == "function" and getCurrentLine()) or ""
+  text = NebbieDash.stripColors(text)
+  local nome = text:match("^L'aura di luce Divina che avvolge (.+) scompare%.%s*$")
+  if not nome then return end
+  NebbieDash.hlColorSpan(text, 255, 255, 0)
+  NebbieDash.hlColorSpan(nome, 255, 0, 0, 255, 255, 0)
+  if type(echo) == "function" then
+    echo("\n")
+    for _ = 1, 3 do
+      if type(setFgColor) == "function" then setFgColor(255, 0, 0) end
+      if type(setBgColor) == "function" then setBgColor(255, 255, 0) end
+      echo("RESANK " .. nome .. "\n")
+      if type(resetFormat) == "function" then resetFormat() end
+    end
+  end
+  NebbieDash.playHighlightSound("aura_loss")
+end
+
+function NebbieDash.onHighlightDisarmOkAltri()
+  if NebbieDash.textHighlights == false then return end
+  local text = line or (type(getCurrentLine) == "function" and getCurrentLine()) or ""
+  text = NebbieDash.stripColors(text)
+  local nome = text:match("^Con una mossa d'arti marziali (%w+) disorienta l'avversario")
+  if not nome then return end
+  NebbieDash.hlColorWholeLine(0, 255, 0)
+  if type(moveCursorEnd) == "function" then moveCursorEnd() end
+  if type(decho) == "function" then
+    decho("\n<0,150,0:255,255,255>Grande " .. nome .. "! bel disarm! <r>\n")
+  end
+end
+
+function NebbieDash.onHighlightDisarmFailAltri()
+  if NebbieDash.textHighlights == false then return end
+  local text = line or (type(getCurrentLine) == "function" and getCurrentLine()) or ""
+  text = NebbieDash.stripColors(text)
+  local nome = text:match("^(%w+) tenta una elegante mossa d'arti marziali, ma finisce rovinosamente a terra%.")
+  if not nome then return end
+  NebbieDash.hlColorSpan(text, 255, 0, 0)
+  if type(moveCursorEnd) == "function" then moveCursorEnd() end
+  if type(decho) == "function" then
+    for _ = 1, 3 do
+      if type(moveCursorEnd) == "function" then moveCursorEnd() end
+      decho("\n<255,255,0:255,0,0> Mannaggia " .. nome .. "! Rotoli come un birillo! <r>\n")
+    end
+  end
+end
+
+function NebbieDash.onHighlightSancWarning()
+  if NebbieDash.textHighlights == false then return end
+  NebbieDash.hlColorWholeLine(255, 0, 0, 255, 255, 255)
+end
+
+function NebbieDash.onHighlightSancGone()
+  if NebbieDash.textHighlights == false then return end
+  NebbieDash.hlColorWholeLine(255, 255, 255, 255, 0, 0)
+  NebbieDash.playHighlightSound("sanc_gone")
+end
+
+function NebbieDash.onHighlightWieldSlot()
+  if NebbieDash.textHighlights == false then return end
+  local text = line or (type(getCurrentLine) == "function" and getCurrentLine()) or ""
+  text = NebbieDash.stripColors(text)
+  local span = text:match("(<impugnato>.*)$") or text:match("(<impugnato>)")
+  if span then
+    NebbieDash.hlColorSpan(span, 0, 0, 255, 0, 170, 0)
+  else
+    NebbieDash.hlColorWholeLine(0, 0, 255, 0, 170, 0)
+  end
+end
+
+function NebbieDash.onHighlightHumber()
+  if NebbieDash.textHighlights == false then return end
+  -- Stile "humber" (rosso su giallo). Stesso testo di humberin in dadomud;
+  -- qui solo evidenziazione + suono, niente swap armi automatico.
+  NebbieDash.hlColorWholeLine(255, 0, 0, 255, 255, 0)
+  NebbieDash.playHighlightSound("humber")
+end
+
+function NebbieDash.onHighlightDigDone()
+  if NebbieDash.textHighlights == false then return end
+  NebbieDash.hlColorWholeLine(24, 202, 53, 255, 255, 255)
+  NebbieDash.playHighlightSound("dig_done")
+end
+
+function NebbieDash.teardownTextHighlightTriggers()
+  for _, id in ipairs(NebbieDash._hlTrigIds or {}) do
+    if id then pcall(function() killTrigger(id) end) end
+  end
+  NebbieDash._hlTrigIds = {}
+end
+
+function NebbieDash.installTextHighlightTriggers()
+  NebbieDash.teardownTextHighlightTriggers()
+  NebbieDash._hlTrigIds = {}
+  if NebbieDash.textHighlights == false then return end
+  local function add(id)
+    if id then table.insert(NebbieDash._hlTrigIds, id) end
+  end
+
+  for _, voce in ipairs(NebbieDash.AUTO_COLOR_GEMS) do
+    local pat, r, g, b, desc = voce.pattern, voce.r, voce.g, voce.b, voce.descrizione
+    add(tempTrigger(pat, string.format(
+      "NebbieDash.onAutoColorGem(%q,%d,%d,%d,%q)", pat, r, g, b, desc)))
+  end
+  for _, voce in ipairs(NebbieDash.AUTO_COLOR_METALS) do
+    local pat, r, g, b = voce.pattern, voce.r, voce.g, voce.b
+    add(tempTrigger(pat, string.format(
+      "NebbieDash.onAutoColorMetal(%q,%d,%d,%d)", pat, r, g, b)))
+  end
+
+  add(tempRegexTrigger(
+    "^L'aura bianca che avvolgeva il corpo di (.+) si spegne\\.$",
+    [[NebbieDash.onHighlightPerditaAura()]]))
+  add(tempRegexTrigger(
+    "^L'aura di luce Divina che avvolge (.+) scompare\\.$",
+    [[NebbieDash.onHighlightPerditaAuraDispel()]]))
+  add(tempRegexTrigger(
+    "^Con una mossa d'arti marziali (\\w+) disorienta l'avversario",
+    [[NebbieDash.onHighlightDisarmOkAltri()]]))
+  add(tempRegexTrigger(
+    "^(\\w+) tenta una elegante mossa d'arti marziali, ma finisce rovinosamente a terra\\.",
+    [[NebbieDash.onHighlightDisarmFailAltri()]]))
+  add(tempTrigger(
+    "L'aura bianca che ti circonda inizia a diventare meno intensa.",
+    [[NebbieDash.onHighlightSancWarning()]]))
+  add(tempTrigger(
+    "L'aura bianca che ti circondava svanisce.",
+    [[NebbieDash.onHighlightSancGone()]]))
+  add(tempTrigger("<impugnato>", [[NebbieDash.onHighlightWieldSlot()]]))
+  add(tempTrigger(
+    "ACCIDENTI!!! Qualcosa si muove nel punto in cui hai scavato!",
+    [[NebbieDash.onHighlightHumber()]]))
+  add(tempTrigger(
+    "Qui non si riesce piu' a scavare, il filone sembra esaurito!",
+    [[NebbieDash.onHighlightDigDone()]]))
 end
 
 function NebbieDash.resolveWeaponTargetFromArg(data, argStr)
@@ -5707,6 +6010,7 @@ function NebbieDash.teardownTriggers()
     if id then pcall(function() killTrigger(id) end) end
   end
   NebbieDash._spellExpiryTrigs = {}
+  NebbieDash.teardownTextHighlightTriggers()
   NebbieDash.teardownSpellShortcutTriggers()
 end
 
@@ -5781,6 +6085,7 @@ function NebbieDash.installTriggers()
     local id = tempTrigger(entry.text, string.format("NebbieDash.onSpellExpiredLine(%q)", entry.spell))
     table.insert(NebbieDash._spellExpiryTrigs, id)
   end
+  NebbieDash.installTextHighlightTriggers()
   if NebbieDash._groupSoloTrig then pcall(disableTrigger, NebbieDash._groupSoloTrig) end
   if NebbieDash._groupHeaderTrig then pcall(disableTrigger, NebbieDash._groupHeaderTrig) end
   -- Gli anonymous event handler restano registrati una volta sola (a
@@ -5836,6 +6141,7 @@ function NebbieDash.migrateSharedConfigFiles()
     "nebbie-batch-items.csv",
     "nebbie-ident-batch-commands.txt",
     "nebbie-dash-preferences.txt",
+    "nebbie-dash-sounds.txt",
     "nebbie-ident-db.lua",
   }
   for _, f in ipairs(files) do
@@ -5855,6 +6161,7 @@ function NebbieDash.boot()
   NebbieDash.loadIdentDb()
   NebbieDash.loadUiStore()
   NebbieDash.loadPreferences()
+  NebbieDash.loadSoundsConfig()
   NebbieDash.prefs.sidebar_mode = "dock"
   NebbieDash.sidebarMode = "dock"
   NebbieDash.loadSpeedwalks()

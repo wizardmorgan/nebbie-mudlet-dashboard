@@ -15,6 +15,16 @@ function disableTrigger() end
 function enableTrigger() end
 function killTrigger() end
 function killTimer() end
+function selectString() return true end
+function setFgColor() end
+function setBgColor() end
+function resetFormat() end
+function decho() end
+function moveCursorEnd() end
+function playSoundFile() end
+_G.__hlEchoLog = {}
+function echo(s) table.insert(_G.__hlEchoLog, tostring(s or "")) end
+function killTimer() end
 local lastSent = nil
 local sentLog = {}
 function send(cmd) lastSent = cmd; table.insert(sentLog, cmd) end
@@ -45,7 +55,6 @@ function setLabelToolTip() end
 function moveLabel() end
 function resizeLabel() end
 function setLabelStyleSheet() end
-function echo() end
 function cechoLink() end
 registerAnonymousEventHandler = function() end
 
@@ -1306,6 +1315,44 @@ check("identdb: hold assegna Mirari",
     and NebbieDash._identDropPending == nil)
 check("identdb: listIdentDbByCharacter su possesso Mirari",
   #NebbieDash.listIdentDbByCharacter("Mirari") >= 1)
+
+-- Evidenziazioni testo (v1.15.52, portate da dadomud)
+check("highlight: lista gemme contiene spinello blu",
+  (function()
+    for _, v in ipairs(NebbieDash.AUTO_COLOR_GEMS) do
+      if v.pattern == "Una pietra di spinello blu" and v.descrizione == "-2 SF" then
+        return true
+      end
+    end
+    return false
+  end)())
+check("highlight: lista metalli contiene carbone",
+  (function()
+    for _, v in ipairs(NebbieDash.AUTO_COLOR_METALS) do
+      if v.pattern == "Una pietra di carbone" then return true end
+    end
+    return false
+  end)())
+NebbieDash.textHighlights = true
+_G.__hlEchoLog = {}
+line = "L'aura bianca che avvolgeva il corpo di Mirari si spegne."
+NebbieDash.onHighlightPerditaAura()
+check("highlight: perdita_aura scrive RESANK",
+  table.concat(_G.__hlEchoLog):find("RESANK Mirari", 1, true) ~= nil)
+_G.__hlEchoLog = {}
+line = "L'aura di luce Divina che avvolge Mirari scompare."
+NebbieDash.onHighlightPerditaAuraDispel()
+local resankCount = 0
+for _, s in ipairs(_G.__hlEchoLog) do
+  if s:find("RESANK Mirari", 1, true) then resankCount = resankCount + 1 end
+end
+check("highlight: perdita_aura_dispel scrive RESANK x3", resankCount == 3)
+NebbieDash.textHighlights = false
+_G.__hlEchoLog = {}
+line = "L'aura bianca che avvolgeva il corpo di Mirari si spegne."
+NebbieDash.onHighlightPerditaAura()
+check("highlight: text_highlights off non scrive RESANK", #_G.__hlEchoLog == 0)
+NebbieDash.textHighlights = true
 
 print("")
 if failures == 0 then

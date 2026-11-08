@@ -91,6 +91,22 @@ Nessun alias invia comandi al MUD in automatico all'avvio (scelta deliberata, ve
 | `nidentdb hold <oggetto> <NomePg>` | Assegna possesso senza drop pendente. |
 | `nidentdbreload` | Ricarica l’archivio identify dal disco. |
 
+## Evidenziazioni testo (gemme / combat / dig)
+
+Portate da dadomud (solo colori e testi extra, **senza** automazioni dig).
+
+- **Gemme**: colora la riga e aggiunge `[descrizione]` (es. spinello blu → `[-2 SF]`).
+- **Metalli/minerali**: solo colore (pepite, ferro, carbone).
+- **Aura**: perdita sanctuary su altri → evidenzia + `RESANK <nome>` (×1 o ×3 se dispel).
+- **Disarm altri**: ok verde + “Grande … bel disarm!”; fail rosso + 3× “Mannaggia…”.
+- **Sanc proprio**: warning rosso/bianco; aura svanita bianco/rosso.
+- **`<impugnato>`** in eq: blu su verde.
+- **Dig**: “ACCIDENTI!!! Qualcosa si muove…” e “filone sembra esaurito!” colorati.
+
+Attiva/disattiva con `text_highlights = on|off` in `nebbie-dash-preferences.txt`
+(`npreferencesreload`). Suoni opzionali (path file) in `nebbie-dash-sounds.txt`
+(`humber`, `dig_done`, `sanc_gone`, `aura_loss`) — vuoto = silenzioso.
+
 ## Archivio identify (`nidentdb`)
 
 Ogni volta che un personaggio fa `cast 'identify'` / `reci …` di una pergamena di
