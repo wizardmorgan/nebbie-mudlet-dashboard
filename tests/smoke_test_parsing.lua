@@ -1153,6 +1153,15 @@ if type(NebbieDash.isValidMpackageInstallUrl) == "function" then
 else
   check("package update: isValidMpackageInstallUrl assente (skip)", true)
 end
+if type(NebbieDash.parseGithubCommitSha) == "function" then
+  check("package update: parseGithubCommitSha",
+    NebbieDash.parseGithubCommitSha('{"sha":"cb1e0b7abcdef0123456789","commit":{}}') == "cb1e0b7abcdef0123456789")
+  check("package update: mpackageUrlForSha pin",
+    NebbieDash.mpackageUrlForSha("cb1e0b7abcdef"):find("@cb1e0b7/", 1, true) ~= nil)
+else
+  check("package update: parseGithubCommitSha assente (skip)", true)
+  check("package update: mpackageUrlForSha pin assente (skip)", true)
+end
 
 -- Archivio identify condiviso (v1.15.51): parser + upsert + holders + capture
 local mantelloLines = {

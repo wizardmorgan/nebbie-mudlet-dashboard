@@ -1,5 +1,11 @@
 # CHANGELOG — nebbie-complete-dashboard-package
 
+## 1.15.60 — 2026-11-08
+
+- **npackageupdate**: non usa più solo jsDelivr `@main` (poteva restare stale, es.
+  1.15.56). Risolve lo SHA tip di `main` via GitHub API e scarica il `.mpackage`
+  pinnato a quel commit.
+
 ## 1.15.59 — 2026-11-08
 
 - **Know al look in stanza**: accanto al nome mob già in archivio appende tag

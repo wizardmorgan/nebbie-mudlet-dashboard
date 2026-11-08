@@ -9,14 +9,18 @@
 -- docs/mudlet/analysis/RECOMMENDATION.md. Pattern prompt/eq basati su dati reali
 -- forniti dall'utente (docs/mudlet/analysis/Q&A.md, Round 3).
 
-local PKG_VER = "1.15.59"
--- jsDelivr: raw.githubusercontent.com tiene spesso in cache .mpackage vecchi
--- (osservato: main serviva ancora 1.15.51 dopo push 1.15.53). Commit-pin
--- tramite @main su jsDelivr e' allineato al tip di GitHub.
+local PKG_VER = "1.15.60"
+local PKG_REPO = "wizardmorgan/nebbie-mudlet-dashboard"
+local PKG_FILE = "nebbie-complete-dashboard-package.mpackage"
+-- @main su jsDelivr puo' restare stale (osservato: restava 1.15.56 mentre tip
+-- era 1.15.59). npackageupdate risolve lo SHA tip via GitHub API e scarica
+-- pinnato a quel commit. website/@main resta per Installa da URL.
 local PKG_MPACKAGE_URL =
-  "https://cdn.jsdelivr.net/gh/wizardmorgan/nebbie-mudlet-dashboard@main/nebbie-complete-dashboard-package.mpackage"
+  "https://cdn.jsdelivr.net/gh/" .. PKG_REPO .. "@main/" .. PKG_FILE
 local PKG_CORE_RAW_URL =
-  "https://cdn.jsdelivr.net/gh/wizardmorgan/nebbie-mudlet-dashboard@main/nebbie-complete-dashboard-package-core.lua"
+  "https://cdn.jsdelivr.net/gh/" .. PKG_REPO .. "@main/nebbie-complete-dashboard-package-core.lua"
+local PKG_GITHUB_TIP_URL =
+  "https://api.github.com/repos/" .. PKG_REPO .. "/commits/main"
 
 local _prevPkgVer = NebbieDash and NebbieDash._loadedVer
 -- Non uscire in anticipo dal chunk core (alias/trigger del package possono essere
@@ -64,7 +68,50 @@ function _G.NebbieDashPostPackageInstall(pkg)
   end)
 end
 
+function NebbieDash.mpackageUrlForSha(sha)
+  sha = tostring(sha or ""):match("^%s*([0-9a-fA-F]+)") or ""
+  if #sha < 7 then return PKG_MPACKAGE_URL end
+  -- jsDelivr accetta SHA corto o pieno; preferiamo i primi 7 (come git).
+  local short = sha:sub(1, 7)
+  return "https://cdn.jsdelivr.net/gh/" .. PKG_REPO .. "@" .. short .. "/" .. PKG_FILE
+end
+
+function NebbieDash.parseGithubCommitSha(body)
+  if type(body) ~= "string" or body == "" then return nil end
+  -- commits/main: {"sha":"abcdef..."}  (primo sha nel JSON)
+  return body:match('"sha"%s*:%s*"([0-9a-fA-F]+)"')
+end
+
 function _G.NebbieDashOnPackageDownloadDone(_, saveTo)
+  -- Fase 1: risoluzione tip di main via GitHub API.
+  local resolve = _G.NebbieDashPendingRefResolve
+  if resolve and resolve.saveTo and saveTo == resolve.saveTo then
+    _G.NebbieDashPendingRefResolve = nil
+    local body = ""
+    local f = io.open(saveTo, "r")
+    if f then
+      body = f:read("*a") or ""
+      f:close()
+    end
+    pcall(function() os.remove(saveTo) end)
+    local sha = NebbieDash.parseGithubCommitSha(body)
+    local pkg = resolve.pkg or "nebbie-complete-dashboard-package"
+    local url
+    if sha then
+      url = NebbieDash.mpackageUrlForSha(sha)
+      cecho("<grey>Tip main risolto: <white>" .. sha:sub(1, 7) ..
+        "<grey> → scarico package pinnato (evita cache jsDelivr @main).\n")
+      cecho("<grey>" .. url .. "\n")
+    else
+      url = PKG_MPACKAGE_URL
+      cecho("<orange>[NebbieDash] SHA tip non letto dall'API; fallback su @main (puo' essere stale).\n")
+      cecho("<grey>" .. url .. "\n")
+    end
+    NebbieDash.runPackageUpdateInstall(url, pkg, resolve.hadInstalledVer)
+    return
+  end
+
+  -- Fase 2: .mpackage scaricato → installPackage.
   local pending = _G.NebbieDashPendingPackageInstall
   if not pending or not pending.saveTo or saveTo ~= pending.saveTo then return end
   if pending.installStarted then return end
@@ -85,6 +132,14 @@ function _G.NebbieDashOnPackageDownloadDone(_, saveTo)
 end
 
 function _G.NebbieDashOnPackageDownloadError(_, msg, saveTo)
+  local resolve = _G.NebbieDashPendingRefResolve
+  if resolve and resolve.saveTo and saveTo == resolve.saveTo then
+    _G.NebbieDashPendingRefResolve = nil
+    cecho("<red>Risoluzione tip main fallita: " .. tostring(msg) .. "\n")
+    cecho("<orange>Fallback su @main (puo' essere cache vecchia). Oppure Installa da URL pinnata.\n")
+    NebbieDash.runPackageUpdateInstall(PKG_MPACKAGE_URL, resolve.pkg, resolve.hadInstalledVer)
+    return
+  end
   local pending = _G.NebbieDashPendingPackageInstall
   if not pending or saveTo ~= pending.saveTo then return end
   local url = pending.url or PKG_MPACKAGE_URL
@@ -135,7 +190,8 @@ function _G.NebbieDashRunPendingPackageInstall()
     pending.saveTo = home .. "/nebbie-dash-update.mpackage"
     pending.installStarted = false
     pcall(function() os.remove(pending.saveTo) end)
-    cecho("<grey>Scarico '" .. pkg .. "' (cache-bust — evita .mpackage vecchio da GitHub raw)...\n")
+    cecho("<grey>Scarico '" .. pkg .. "'...\n")
+    -- Cache-bust query su URL gia' pinnato allo SHA (jsDelivr ignora spesso ?cb su @main).
     downloadFile(pending.saveTo, cleanUrl .. "?cb=" .. tostring(os.time()))
     return true
   end
@@ -220,25 +276,44 @@ function NebbieDash.runPackageUpdateInstall(installUrl, pkg, hadInstalledVer)
   return true
 end
 
+-- Prima risolve lo SHA tip di main (API GitHub), poi uninstall+download pinnato.
+function NebbieDash.startPackageUpdateResolveTip(pkg, hadInstalledVer)
+  pkg = pkg or NebbieDash.package or "nebbie-complete-dashboard-package"
+  if type(downloadFile) ~= "function" then
+    cecho("<orange>[NebbieDash] downloadFile assente — uso URL @main direttamente.\n")
+    NebbieDash.runPackageUpdateInstall(PKG_MPACKAGE_URL, pkg, hadInstalledVer)
+    return
+  end
+  NebbieDash.ensurePackageDownloadHandlers()
+  local home = (type(getMudletHomeDir) == "function" and getMudletHomeDir()) or "."
+  local saveTo = home .. "/nebbie-dash-main-tip.json"
+  pcall(function() os.remove(saveTo) end)
+  _G.NebbieDashPendingRefResolve = {
+    saveTo = saveTo,
+    pkg = pkg,
+    hadInstalledVer = hadInstalledVer and true or false,
+  }
+  cecho("<grey>Risolvo tip di <white>main<grey> via GitHub API...\n")
+  downloadFile(saveTo, PKG_GITHUB_TIP_URL .. "?cb=" .. tostring(os.time()))
+end
+
 function NebbieDash.cmdPackageUpdate(argStr)
   argStr = (argStr or ""):match("^%s*(.-)%s*$"):lower()
   local force = (argStr == "force" or argStr == "forza")
-  local url = PKG_MPACKAGE_URL
   local pkg = NebbieDash.package or "nebbie-complete-dashboard-package"
   local installedVer = ""
   if type(getPackageInfo) == "function" then
     installedVer = getPackageInfo(pkg, "version") or ""
   end
   local remoteVer = NebbieDash.fetchRemotePackageVersionSync()
-  cecho("<yellow>[NebbieDash] Aggiornamento da wizardmorgan/nebbie-mudlet-dashboard (main)...\n")
+  cecho("<yellow>[NebbieDash] Aggiornamento da " .. PKG_REPO .. " (main)...\n")
   cecho("<grey>Package Manager (installato): <white>" .. (installedVer ~= "" and installedVer or "—") ..
     "<grey> — in esecuzione ora: <white>" .. (NebbieDash.version or "?") .. "\n")
   if remoteVer then
-    cecho("<grey>Ultima versione su GitHub (core.lua): <white>" .. remoteVer .. "\n")
+    cecho("<grey>Ultima versione nota (getHttp): <white>" .. remoteVer .. "\n")
   else
-    cecho("<grey>Ultima versione su GitHub: <white>(getHttp non disponibile — download con cache-bust)\n")
+    cecho("<grey>Versione remota: <white>risolvo tip main (SHA) poi scarico package pinnato\n")
   end
-  cecho("<grey>" .. url .. "\n")
   if not force and remoteVer and installedVer ~= "" and remoteVer == installedVer and remoteVer == NebbieDash.version then
     cecho("<yellow>Sei gia' alla <white>" .. remoteVer ..
       "<yellow>. Reinstallo comunque (o usa <white>npackageupdate force<yellow>).\n")
@@ -251,12 +326,9 @@ function NebbieDash.cmdPackageUpdate(argStr)
     cecho("<orange>uninstallPackage non disponibile — disinstalla da Package Manager e reinstalla.\n")
     return
   end
-  local installUrl = NebbieDash.cleanMpackageUrl(url)
-  local expect = remoteVer or "vedi Package Manager"
-  cecho("<green>Avvio aggiornamento (atteso: <white>" .. expect ..
-    "<green>) — attendi <white>Package Manager: …<green> e <white>v… pronto<green>.\n")
+  cecho("<green>Avvio aggiornamento — attendi risoluzione tip, poi Package Manager / v… pronto.\n")
   tempTimer(0.05, function()
-    NebbieDash.runPackageUpdateInstall(installUrl, pkg, installedVer ~= "")
+    NebbieDash.startPackageUpdateResolveTip(pkg, installedVer ~= "")
   end)
 end
 
