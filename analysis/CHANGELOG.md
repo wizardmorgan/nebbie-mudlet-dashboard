@@ -1,5 +1,14 @@
 # CHANGELOG — nebbie-complete-dashboard-package
 
+## 1.15.55 — 2026-11-08
+
+- **Archivio know monster** (`nknowdb` / `nknowdb race` / `nknowdbreload`): cattura il
+  blocco di `cast 'know monster'` e lo salva in `nebbie-know-db.lua` (cartella
+  condivisa `profiles/ndashboard`), stesso schema di `nidentdb`.
+- Merge dei campi tra cast a livelli diversi; numeri `GetApprox` aggiornati a ogni cast.
+- Evidenziazioni / testo extra su look o room listing: **non** in questa release
+  (criteri da definire).
+
 ## 1.15.54 — 2026-11-08
 
 - **URL download**: canonico su **jsDelivr**

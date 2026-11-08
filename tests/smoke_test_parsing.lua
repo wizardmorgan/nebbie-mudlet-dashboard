@@ -1354,6 +1354,79 @@ NebbieDash.onHighlightPerditaAura()
 check("highlight: text_highlights off non scrive RESANK", #_G.__hlEchoLog == 0)
 NebbieDash.textHighlights = true
 
+-- Archivio know monster (v1.15.55): parser + upsert + merge + capture
+local knowLinesFull = {
+  "Un goblin e' di razza Goblinoid.",
+  "Un goblin ha circa 12340 punti esperienza.",
+  "Un goblin combatte piu' o meno come un guerriero del 18^ livello.",
+  "Un goblin sembra odiare la razza dei Human.",
+  "Un goblin sembra odiare la classe Magic user.",
+  "Probabilmente Un goblin ha 245 punti vita.",
+  "Un goblin e' suscettibile a FIRE COLD.",
+  "Un goblin e' resistente a SLASH.",
+  "Un goblin e' immune a SLEEP CHARM.",
+  "Un goblin ha circa 2.0 attacchi per turno.",
+  "Ognuno dei quali fa circa 3d6 punti di danno.",
+}
+local knowParsed = NebbieDash.parseKnowMonsterFull(knowLinesFull)
+check("knowdb: parse nome Un goblin", knowParsed and knowParsed.monsterName == "Un goblin")
+check("knowdb: parse razza Goblinoid", knowParsed and knowParsed.race == "Goblinoid")
+check("knowdb: parse exp", knowParsed and knowParsed.exp == 12340)
+check("knowdb: parse warriorLevel", knowParsed and knowParsed.warriorLevel == 18)
+check("knowdb: parse hateRace", knowParsed and knowParsed.hateRace == "Human")
+check("knowdb: parse hateClass", knowParsed and knowParsed.hateClass == "Magic user")
+check("knowdb: parse hits", knowParsed and knowParsed.hits == 245)
+check("knowdb: parse susceptible", knowParsed and knowParsed.susceptible
+  and knowParsed.susceptible[1] == "FIRE" and knowParsed.susceptible[2] == "COLD")
+check("knowdb: parse resistant", knowParsed and knowParsed.resistant
+  and knowParsed.resistant[1] == "SLASH")
+check("knowdb: parse immune", knowParsed and knowParsed.immune
+  and knowParsed.immune[1] == "SLEEP" and knowParsed.immune[2] == "CHARM")
+check("knowdb: parse attacks", knowParsed and knowParsed.attacks == 2)
+check("knowdb: parse damageDice", knowParsed and knowParsed.damageDice == "3d6")
+check("knowdb: PC non mostro → nil",
+  NebbieDash.parseKnowMonsterFull({"Non e' realmente un mostro."}) == nil)
+
+NebbieDash.knowDb = { entries = {} }
+NebbieDash.persistEnabled = true
+NebbieDash.currentChar = "Mirari"
+local lowCast = NebbieDash.parseKnowMonsterFull({
+  "Un goblin e' di razza Goblinoid.",
+  "Un goblin ha circa 999 punti esperienza.",
+})
+NebbieDash.upsertKnowRecord(lowCast, "Mirari", "spell")
+check("knowdb: upsert crea entry", NebbieDash.knowDbEntryCount() == 1)
+local midCast = NebbieDash.parseKnowMonsterFull({
+  "Un goblin e' di razza Goblinoid.",
+  "Un goblin ha circa 1111 punti esperienza.",
+  "Un goblin combatte piu' o meno come un guerriero del 12^ livello.",
+  "Probabilmente Un goblin ha 200 punti vita.",
+})
+NebbieDash.upsertKnowRecord(midCast, "Mirari", "spell")
+local merged = NebbieDash.knowDb.entries[NebbieDash.normalizeKnowMonsterKey("Un goblin")]
+check("knowdb: merge aggiorna exp", merged and merged.exp == 1111)
+check("knowdb: merge aggiunge hits", merged and merged.hits == 200)
+check("knowdb: search goblin", #NebbieDash.searchKnowDb("goblin") == 1)
+check("knowdb: race Goblinoid", #NebbieDash.listKnowDbByRace("Goblinoid") == 1)
+check("knowdb: race Human vuoto", #NebbieDash.listKnowDbByRace("Human") == 0)
+
+-- Capture: race line start + follow-up lines + prompt close
+NebbieDash.knowDb = { entries = {} }
+NebbieDash._knowSourceHint = { source = "spell", at = os.time() }
+line = "Un orco e' di razza Humanoid."
+NebbieDash.onKnowMonsterRaceLine()
+check("knowdb: capture start attiva", NebbieDash._knowCapture ~= nil)
+line = "Un orco ha circa 5000 punti esperienza."
+NebbieDash.onKnowArchiveLine()
+line = "Un orco combatte piu' o meno come un guerriero del 10^ livello."
+NebbieDash.onKnowArchiveLine()
+line = "Mirari H: 100/100 M: 50/50 V: 10/10 x:0 *:* *:* [[ ]] G:0 >>"
+NebbieDash.onKnowArchiveLine()
+check("knowdb: capture chiude su prompt", NebbieDash._knowCapture == nil)
+local orco = NebbieDash.knowDb.entries[NebbieDash.normalizeKnowMonsterKey("Un orco")]
+check("knowdb: capture upsert orco", orco and orco.race == "Humanoid" and orco.exp == 5000)
+check("knowdb: capture source spell", orco and orco.lastSource == "spell")
+
 print("")
 if failures == 0 then
   print("TUTTI I TEST OK (" .. #eqLines .. " righe eq, " .. #attribLines .. " righe attrib)")

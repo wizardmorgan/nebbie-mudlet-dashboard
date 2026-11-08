@@ -9,7 +9,7 @@
 -- docs/mudlet/analysis/RECOMMENDATION.md. Pattern prompt/eq basati su dati reali
 -- forniti dall'utente (docs/mudlet/analysis/Q&A.md, Round 3).
 
-local PKG_VER = "1.15.54"
+local PKG_VER = "1.15.55"
 -- jsDelivr: raw.githubusercontent.com tiene spesso in cache .mpackage vecchi
 -- (osservato: main serviva ancora 1.15.51 dopo push 1.15.53). Commit-pin
 -- tramite @main su jsDelivr e' allineato al tip di GitHub.
@@ -1114,6 +1114,7 @@ NebbieDash.SHORTCUT_RESERVED = {
   nforgetspell = true, nbatch = true, nbatchreload = true, nbatchverify = true,
   nidentbatch = true, nidentbatchreload = true, nspellaliases = true, nspellaliasesreload = true,
   nidentdb = true, nidentdbreload = true,
+  nknowdb = true, nknowdbreload = true,
   npackageupdate = true,
   usa = true,
   nconfigdir = true,
@@ -2426,6 +2427,9 @@ NebbieDash.HELP_TEXT = {
   { "nidentdb hold <NomePg>", "Dopo un drop: assegna l'oggetto a terra a un PG." },
   { "nidentdb hold <ogg> <Pg>", "Assegna possesso identify a un PG (senza drop pendente)." },
   { "nidentdbreload", "Ricarica nebbie-ident-db.lua dalla cartella condivisa." },
+  { "nknowdb [query]", "Cerca nell'archivio know monster condiviso (profiles/ndashboard)." },
+  { "nknowdb race <razza>", "Elenca mostri per razza (es. nknowdb race Goblinoid)." },
+  { "nknowdbreload", "Ricarica nebbie-know-db.lua dalla cartella condivisa." },
   { "identify <arma>", "(comando di gioco) Rileva il tipo di danno (slash/blunt/pierce) per usa/disarmo." },
   { "nhelp", "Mostra/nascondi questa finestra." },
 }
@@ -3978,6 +3982,440 @@ function NebbieDash.cmdReloadIdentDb()
 end
 
 -- ---------------------------------------------------------------------------
+-- Archivio know monster (condiviso profiles/ndashboard) — stesso schema di
+-- nidentdb. Cattura il blocco di cast 'know monster' (format string da
+-- spell_know_monster in magic3.cpp). Numeri GetApprox: noisy, si aggiornano
+-- a ogni cast. Colori/aggiunte testo stile dadomud: criteri in seguito.
+-- ---------------------------------------------------------------------------
+NebbieDash.KNOW_DB_SAVE_DELAY = 0.2
+NebbieDash.KNOW_CAPTURE_TIMEOUT = 3
+NebbieDash.KNOW_SOURCE_HINT_TTL = 8
+
+function NebbieDash.knowDbPath()
+  return NebbieDash.configPath("nebbie-know-db.lua")
+end
+
+function NebbieDash.loadKnowDb()
+  NebbieDash.ensureConfigDir()
+  NebbieDash.knowDb = NebbieDash.knowDb or { entries = {} }
+  NebbieDash.knowDb.entries = NebbieDash.knowDb.entries or {}
+  local path = NebbieDash.knowDbPath()
+  if type(io.exists) == "function" and io.exists(path) then
+    local loaded = {}
+    local ok = pcall(function() table.load(path, loaded) end)
+    if ok and type(loaded.entries) == "table" then
+      NebbieDash.knowDb = loaded
+      NebbieDash.knowDb.entries = NebbieDash.knowDb.entries or {}
+    end
+  end
+end
+
+function NebbieDash.saveKnowDb()
+  if not NebbieDash.persistEnabled then return end
+  NebbieDash.ensureConfigDir()
+  NebbieDash.knowDb = NebbieDash.knowDb or { entries = {} }
+  pcall(function() table.save(NebbieDash.knowDbPath(), NebbieDash.knowDb) end)
+end
+
+function NebbieDash.flushKnowDbSave()
+  NebbieDash._knowDbSavePending = false
+  NebbieDash._knowDbSaveTimer = nil
+  NebbieDash.saveKnowDb()
+end
+
+function NebbieDash.scheduleKnowDbSave()
+  if NebbieDash._knowDbSavePending then return end
+  NebbieDash._knowDbSavePending = true
+  if type(tempTimer) == "function" then
+    NebbieDash._knowDbSaveTimer = tempTimer(NebbieDash.KNOW_DB_SAVE_DELAY or 0.2, function()
+      NebbieDash.flushKnowDbSave()
+    end)
+  else
+    NebbieDash.flushKnowDbSave()
+  end
+end
+
+function NebbieDash.normalizeKnowMonsterKey(name)
+  return ((name or ""):lower():match("^%s*(.-)%s*$")) or ""
+end
+
+function NebbieDash.splitKnowBitList(text)
+  local out = {}
+  for token in (text or ""):gmatch("%S+") do
+    table.insert(out, token)
+  end
+  return out
+end
+
+-- Parser del blocco know monster (righe già senza colori ANSI Mudlet).
+-- Livelli caster (codice, non help): razza sempre; exp>5; livello>10; hate>15;
+-- hits>20; susc>25; resist>30; immune>35; attacchi>40; danno>45.
+function NebbieDash.parseKnowMonsterFull(lines)
+  local entry = {
+    monsterName = nil,
+    race = nil,
+    exp = nil,
+    warriorLevel = nil,
+    hateRace = nil,
+    hateClass = nil,
+    hits = nil,
+    susceptible = nil,
+    resistant = nil,
+    immune = nil,
+    attacks = nil,
+    damageDice = nil,
+  }
+  for _, raw in ipairs(lines or {}) do
+    local text = NebbieDash.stripColors(raw or ""):match("^%s*(.-)%s*$") or ""
+    if text == "" then
+      -- skip
+    elseif text:match("^Non e' realmente un mostro%.%s*$") then
+      return nil
+    else
+      local name, race = text:match("^(.+) e' di razza (.+)%.%s*$")
+      if name and race then
+        entry.monsterName = name
+        entry.race = race:match("^%s*(.-)%s*$")
+      end
+      local nExp, exp = text:match("^(.+) ha circa (%d+) punti esperienza%.%s*$")
+      if nExp and exp then
+        entry.monsterName = entry.monsterName or nExp
+        entry.exp = tonumber(exp)
+      end
+      local nLev, lev = text:match(
+        "^(.+) combatte piu' o meno come un guerriero del (%d+)%^ livello%.%s*$")
+      if nLev and lev then
+        entry.monsterName = entry.monsterName or nLev
+        entry.warriorLevel = tonumber(lev)
+      end
+      local nHr, hr = text:match("^(.+) sembra odiare la razza dei (.+)%.%s*$")
+      if nHr and hr then
+        entry.monsterName = entry.monsterName or nHr
+        entry.hateRace = hr:match("^%s*(.-)%s*$")
+      end
+      local nHc, hc = text:match("^(.+) sembra odiare la classe (.+)%.%s*$")
+      if nHc and hc then
+        entry.monsterName = entry.monsterName or nHc
+        entry.hateClass = hc:match("^%s*(.-)%s*$")
+      end
+      local nHit, hits = text:match("^Probabilmente (.+) ha (%d+) punti vita%.%s*$")
+      if nHit and hits then
+        entry.monsterName = entry.monsterName or nHit
+        entry.hits = tonumber(hits)
+      end
+      local nSus, sus = text:match("^(.+) e' suscettibile a (.+)%.%s*$")
+      if nSus and sus then
+        entry.monsterName = entry.monsterName or nSus
+        entry.susceptible = NebbieDash.splitKnowBitList(sus)
+      end
+      local nRes, res = text:match("^(.+) e' resistente a (.+)%.%s*$")
+      if nRes and res then
+        entry.monsterName = entry.monsterName or nRes
+        entry.resistant = NebbieDash.splitKnowBitList(res)
+      end
+      local nImm, imm = text:match("^(.+) e' immune a (.+)%.%s*$")
+      if nImm and imm then
+        entry.monsterName = entry.monsterName or nImm
+        entry.immune = NebbieDash.splitKnowBitList(imm)
+      end
+      local nAtt, att = text:match("^(.+) ha circa (%d+)%.0 attacchi per turno%.%s*$")
+      if nAtt and att then
+        entry.monsterName = entry.monsterName or nAtt
+        entry.attacks = tonumber(att)
+      end
+      local dA, dB = text:match(
+        "^Ognuno dei quali fa circa (%d+)d(%d+) punti di danno%.%s*$")
+      if dA and dB then
+        entry.damageDice = tostring(dA) .. "d" .. tostring(dB)
+      end
+    end
+  end
+  if not entry.monsterName or entry.monsterName == "" then return nil end
+  if not entry.race or entry.race == "" then return nil end
+  return entry
+end
+
+function NebbieDash.upsertKnowRecord(parsed, character, source)
+  if not parsed or not parsed.monsterName then return nil end
+  local key = NebbieDash.normalizeKnowMonsterKey(parsed.monsterName)
+  if key == "" then return nil end
+  NebbieDash.knowDb = NebbieDash.knowDb or { entries = {} }
+  NebbieDash.knowDb.entries = NebbieDash.knowDb.entries or {}
+  local now = os.time()
+  local existing = NebbieDash.knowDb.entries[key] or {}
+  existing.key = key
+  existing.monsterName = parsed.monsterName
+  existing.race = parsed.race
+  -- Merge: aggiorna i campi presenti; conserva quelli noti da cast di livello
+  -- più alto se il cast corrente non li ha rivelati.
+  if parsed.exp ~= nil then existing.exp = parsed.exp end
+  if parsed.warriorLevel ~= nil then existing.warriorLevel = parsed.warriorLevel end
+  if parsed.hateRace ~= nil then existing.hateRace = parsed.hateRace end
+  if parsed.hateClass ~= nil then existing.hateClass = parsed.hateClass end
+  if parsed.hits ~= nil then existing.hits = parsed.hits end
+  if parsed.susceptible ~= nil then existing.susceptible = parsed.susceptible end
+  if parsed.resistant ~= nil then existing.resistant = parsed.resistant end
+  if parsed.immune ~= nil then existing.immune = parsed.immune end
+  if parsed.attacks ~= nil then existing.attacks = parsed.attacks end
+  if parsed.damageDice ~= nil then existing.damageDice = parsed.damageDice end
+  existing.lastAt = now
+  existing.lastCharacter = character or existing.lastCharacter or "unknown"
+  existing.lastSource = source or existing.lastSource
+  existing.byCharacter = existing.byCharacter or {}
+  local who = character or "unknown"
+  existing.byCharacter[who] = {
+    at = now,
+    source = source or (existing.byCharacter[who] and existing.byCharacter[who].source),
+  }
+  NebbieDash.knowDb.entries[key] = existing
+  NebbieDash.scheduleKnowDbSave()
+  return existing
+end
+
+function NebbieDash.noteKnowSourceHint(source)
+  if not source or source == "" then return end
+  NebbieDash._knowSourceHint = { source = source, at = os.time() }
+end
+
+function NebbieDash.consumeKnowSourceHint()
+  local hint = NebbieDash._knowSourceHint
+  NebbieDash._knowSourceHint = nil
+  if not hint or not hint.at then return nil end
+  if (os.time() - hint.at) > (NebbieDash.KNOW_SOURCE_HINT_TTL or 8) then
+    return nil
+  end
+  return hint.source
+end
+
+function NebbieDash.onKnowSourceSpellLine()
+  local text = line or (type(getCurrentLine) == "function" and getCurrentLine()) or ""
+  text = NebbieDash.stripColors(text)
+  if text:find("Pronunci le parole, 'know monster'", 1, true)
+      or text:find('Pronunci le parole, "know monster"', 1, true) then
+    NebbieDash.noteKnowSourceHint("spell")
+  end
+end
+
+function NebbieDash.armKnowCaptureWatchdog(gen)
+  if type(tempTimer) ~= "function" then return end
+  tempTimer(NebbieDash.KNOW_CAPTURE_TIMEOUT or 3, function()
+    local cap = NebbieDash._knowCapture
+    if not cap or NebbieDash._knowCaptureGen ~= gen then return end
+    if cap.activity ~= cap.watchedActivity then
+      cap.watchedActivity = cap.activity
+      NebbieDash.armKnowCaptureWatchdog(gen)
+    else
+      NebbieDash.finishKnowArchiveCapture()
+    end
+  end)
+end
+
+function NebbieDash.startKnowMonsterCapture()
+  if NebbieDash._knowCapture then
+    NebbieDash.finishKnowArchiveCapture()
+  end
+  NebbieDash._knowCaptureGen = (NebbieDash._knowCaptureGen or 0) + 1
+  local gen = NebbieDash._knowCaptureGen
+  NebbieDash._knowCapture = {
+    lines = {},
+    character = NebbieDash.currentChar or "unknown",
+    source = NebbieDash.consumeKnowSourceHint(),
+    activity = 0,
+    watchedActivity = 0,
+    startedAt = os.time(),
+  }
+  if NebbieDash._knowLineTrig then
+    pcall(enableTrigger, NebbieDash._knowLineTrig)
+  end
+  NebbieDash.armKnowCaptureWatchdog(gen)
+end
+
+-- Prima riga utile del blocco: "<Nome> e' di razza <Razza>."
+function NebbieDash.onKnowMonsterRaceLine()
+  local text = line or (type(getCurrentLine) == "function" and getCurrentLine()) or ""
+  text = NebbieDash.stripColors(text or "")
+  local trimmed = text:match("^%s*(.-)%s*$") or ""
+  if not trimmed:match("e' di razza ") then return end
+  NebbieDash.startKnowMonsterCapture()
+  local cap = NebbieDash._knowCapture
+  if not cap then return end
+  table.insert(cap.lines, trimmed)
+  cap.activity = (cap.activity or 0) + 1
+end
+
+function NebbieDash.onKnowArchiveLine()
+  local cap = NebbieDash._knowCapture
+  if not cap then
+    if NebbieDash._knowLineTrig then pcall(disableTrigger, NebbieDash._knowLineTrig) end
+    return
+  end
+  local text = line or (type(getCurrentLine) == "function" and getCurrentLine()) or ""
+  text = NebbieDash.stripColors(text or "")
+  local trimmed = text:match("^%s*(.-)%s*$") or ""
+  if NebbieDash.isAnyPromptLine(trimmed) then
+    NebbieDash.finishKnowArchiveCapture()
+    return
+  end
+  -- Evita di duplicare la riga razza già inserita dallo start handler.
+  if #cap.lines == 1 and trimmed == cap.lines[1] then
+    return
+  end
+  if trimmed ~= "" then
+    table.insert(cap.lines, trimmed)
+    cap.activity = (cap.activity or 0) + 1
+  end
+end
+
+function NebbieDash.finishKnowArchiveCapture()
+  local cap = NebbieDash._knowCapture
+  NebbieDash._knowCapture = nil
+  if NebbieDash._knowLineTrig then
+    pcall(disableTrigger, NebbieDash._knowLineTrig)
+  end
+  if not cap then return end
+  local parsed = NebbieDash.parseKnowMonsterFull(cap.lines)
+  if not parsed then return end
+  NebbieDash.upsertKnowRecord(parsed, cap.character, cap.source)
+end
+
+function NebbieDash.knowDbEntryCount()
+  local n = 0
+  for _ in pairs((NebbieDash.knowDb and NebbieDash.knowDb.entries) or {}) do
+    n = n + 1
+  end
+  return n
+end
+
+function NebbieDash.searchKnowDb(query)
+  query = (query or ""):lower():match("^%s*(.-)%s*$") or ""
+  local results = {}
+  for _, entry in pairs((NebbieDash.knowDb and NebbieDash.knowDb.entries) or {}) do
+    if query == "" then
+      table.insert(results, entry)
+    else
+      local hay = table.concat({
+        entry.monsterName or "",
+        entry.race or "",
+        entry.hateRace or "",
+        entry.hateClass or "",
+        table.concat(entry.susceptible or {}, " "),
+        table.concat(entry.resistant or {}, " "),
+        table.concat(entry.immune or {}, " "),
+        entry.damageDice or "",
+        entry.lastCharacter or "",
+      }, " "):lower()
+      if hay:find(query, 1, true) then
+        table.insert(results, entry)
+      end
+    end
+  end
+  table.sort(results, function(a, b)
+    return (a.monsterName or "") < (b.monsterName or "")
+  end)
+  return results
+end
+
+function NebbieDash.listKnowDbByRace(raceQuery)
+  raceQuery = (raceQuery or ""):lower():match("^%s*(.-)%s*$") or ""
+  local results = {}
+  for _, entry in pairs((NebbieDash.knowDb and NebbieDash.knowDb.entries) or {}) do
+    local race = (entry.race or ""):lower()
+    if raceQuery == "" or race == raceQuery or race:find(raceQuery, 1, true) then
+      table.insert(results, entry)
+    end
+  end
+  table.sort(results, function(a, b)
+    return (a.monsterName or "") < (b.monsterName or "")
+  end)
+  return results
+end
+
+function NebbieDash.formatKnowDbEntry(entry)
+  if not entry then return {} end
+  local lines = {}
+  table.insert(lines, string.format("<yellow>%s<white> — razza <cyan>%s",
+    entry.monsterName or "?", entry.race or "?"))
+  local stats = {}
+  if entry.warriorLevel ~= nil then
+    table.insert(stats, "liv~" .. tostring(entry.warriorLevel))
+  end
+  if entry.exp ~= nil then table.insert(stats, "exp~" .. tostring(entry.exp)) end
+  if entry.hits ~= nil then table.insert(stats, "hp~" .. tostring(entry.hits)) end
+  if entry.attacks ~= nil then table.insert(stats, "att " .. tostring(entry.attacks)) end
+  if entry.damageDice then table.insert(stats, "dmg " .. entry.damageDice) end
+  if #stats > 0 then
+    table.insert(lines, "  <grey>approx:<white> " .. table.concat(stats, ", "))
+  end
+  if entry.hateRace and entry.hateRace ~= "" then
+    table.insert(lines, "  <grey>odia razza:<white> " .. entry.hateRace)
+  end
+  if entry.hateClass and entry.hateClass ~= "" then
+    table.insert(lines, "  <grey>odia classe:<white> " .. entry.hateClass)
+  end
+  if entry.susceptible and #entry.susceptible > 0 then
+    table.insert(lines, "  <grey>susc:<white> " .. table.concat(entry.susceptible, " "))
+  end
+  if entry.resistant and #entry.resistant > 0 then
+    table.insert(lines, "  <grey>resi:<white> " .. table.concat(entry.resistant, " "))
+  end
+  if entry.immune and #entry.immune > 0 then
+    table.insert(lines, "  <grey>imm:<white> " .. table.concat(entry.immune, " "))
+  end
+  local when = entry.lastAt and os.date("%Y-%m-%d %H:%M", entry.lastAt) or "?"
+  local src = entry.lastSource and (" (" .. entry.lastSource .. ")") or ""
+  table.insert(lines, string.format(
+    "  <grey>ultimo know:<white> %s%s <grey>@ %s",
+    tostring(entry.lastCharacter or "?"), src, when))
+  return lines
+end
+
+function NebbieDash.cmdKnowDb(argStr)
+  argStr = (argStr or ""):match("^%s*(.-)%s*$") or ""
+  local mode, rest = argStr:match("^(%S+)%s+(.-)%s*$")
+  if not mode then
+    mode, rest = argStr, ""
+  end
+  mode = (mode or ""):lower()
+
+  if argStr == "" or mode == "help" or mode == "?" then
+    cecho("<green>[NebbieDash] Archivio know monster: <white>" ..
+      tostring(NebbieDash.knowDbEntryCount()) ..
+      "<green> mostri in <white>" .. NebbieDash.knowDbPath() .. "\n")
+    cecho("<grey>Uso: <yellow>nknowdb <query><grey> | <yellow>nknowdb race <razza><grey> | <yellow>nknowdbreload\n")
+    cecho("<grey>Si aggiorna automaticamente a ogni cast 'know monster' riuscito (NPC).\n")
+    return
+  end
+
+  local results
+  if mode == "race" then
+    results = NebbieDash.listKnowDbByRace(rest)
+  else
+    results = NebbieDash.searchKnowDb(argStr)
+  end
+
+  if not results or #results == 0 then
+    cecho("<orange>[NebbieDash] Nessun know monster in archivio per <white>" .. argStr .. "\n")
+    return
+  end
+  local limit = 40
+  cecho("<green>[NebbieDash] Know monster: <white>" .. tostring(#results) ..
+    ( #results > limit and (" (mostra primi " .. limit .. ")") or "" ) .. "\n")
+  for i, entry in ipairs(results) do
+    if i > limit then break end
+    for _, lineTxt in ipairs(NebbieDash.formatKnowDbEntry(entry)) do
+      cecho(lineTxt .. "\n")
+    end
+  end
+end
+
+function NebbieDash.cmdReloadKnowDb()
+  NebbieDash.loadKnowDb()
+  cecho("<green>[NebbieDash] Know DB ricaricato: <white>" ..
+    tostring(NebbieDash.knowDbEntryCount()) ..
+    "<green> mostri (<white>" .. NebbieDash.knowDbPath() .. "<green>).\n")
+end
+
+-- ---------------------------------------------------------------------------
 -- Evidenziazioni testo (portate da dadomud): gemme/metalli + allarmi combat/dig.
 -- Solo colore / testo aggiuntivo / suono opzionale — nessuna automazione dig.
 -- Preferenza: text_highlights = on|off. Suoni: nebbie-dash-sounds.txt
@@ -4782,6 +5220,9 @@ function NebbieDash.enforceTriggerHygiene()
   if not NebbieDash._identCapture and NebbieDash._identLineTrig then
     pcall(disableTrigger, NebbieDash._identLineTrig)
   end
+  if not NebbieDash._knowCapture and NebbieDash._knowLineTrig then
+    pcall(disableTrigger, NebbieDash._knowLineTrig)
+  end
   if not NebbieDash._batch or not NebbieDash._batch.active then
     NebbieDash.batchDisableLineCapture()
   end
@@ -4802,6 +5243,11 @@ function NebbieDash.enforceTriggerHygiene()
   if NebbieDash._identCapture and NebbieDash._identCapture.startedAt then
     if os.time() - NebbieDash._identCapture.startedAt > 12 then
       NebbieDash.finishIdentArchiveCapture()
+    end
+  end
+  if NebbieDash._knowCapture and NebbieDash._knowCapture.startedAt then
+    if os.time() - NebbieDash._knowCapture.startedAt > 12 then
+      NebbieDash.finishKnowArchiveCapture()
     end
   end
   if NebbieDash._hungerMacroBusy and NebbieDash._hungerMacroBusySince then
@@ -6238,6 +6684,7 @@ function NebbieDash.teardownTriggers()
     NebbieDash._wieldTrig, NebbieDash._identifyObjTrig, NebbieDash._identifyDmgTrig,
     NebbieDash._identKnowledgeTrig, NebbieDash._identSourceSpellTrig, NebbieDash._identSourceScrollTrig,
     NebbieDash._identLineTrig, NebbieDash._identGiveTrig, NebbieDash._identDropTrig,
+    NebbieDash._knowRaceTrig, NebbieDash._knowSourceSpellTrig, NebbieDash._knowLineTrig,
     NebbieDash._stopUsingTrig, NebbieDash._wearBackTrig,
   }
   for _, id in ipairs(ids) do
@@ -6315,6 +6762,12 @@ function NebbieDash.installTriggers()
   -- Possesso: give → altro PG; drop → terra + richiesta nidentdb hold.
   NebbieDash._identGiveTrig = tempTrigger("Dai ", [[NebbieDash.onIdentGiveLine()]])
   NebbieDash._identDropTrig = tempTrigger("Posi ", [[NebbieDash.onIdentDropLine()]])
+  -- Archivio know monster: start su "e' di razza"; catch-all solo in cattura.
+  NebbieDash._knowRaceTrig = tempTrigger("e' di razza ", [[NebbieDash.onKnowMonsterRaceLine()]])
+  NebbieDash._knowSourceSpellTrig = tempTrigger("Pronunci le parole, 'know monster'",
+    [[NebbieDash.onKnowSourceSpellLine()]])
+  NebbieDash._knowLineTrig = tempRegexTrigger("^", [[NebbieDash.onKnowArchiveLine()]])
+  if NebbieDash._knowLineTrig then pcall(disableTrigger, NebbieDash._knowLineTrig) end
   -- Scadenza spell (vedi SPELL_EXPIRY_PATTERNS sopra): un trigger per riga,
   -- shield su substring esatta fornita dall'utente per ognuna.
   NebbieDash._spellExpiryTrigs = {}
@@ -6380,6 +6833,7 @@ function NebbieDash.migrateSharedConfigFiles()
     "nebbie-dash-preferences.txt",
     "nebbie-dash-sounds.txt",
     "nebbie-ident-db.lua",
+    "nebbie-know-db.lua",
   }
   for _, f in ipairs(files) do
     NebbieDash.migrateConfigFileIfNeeded(f)
@@ -6396,6 +6850,7 @@ function NebbieDash.boot()
   NebbieDash.migrateSharedConfigFiles()
   NebbieDash.loadStore()
   NebbieDash.loadIdentDb()
+  NebbieDash.loadKnowDb()
   NebbieDash.loadUiStore()
   NebbieDash.loadPreferences()
   NebbieDash.loadSoundsConfig()

@@ -115,6 +115,8 @@ profilo Mudlet, più personaggi, cambio automatico rilevato dal prompt).
 - **Archivio identify** (`nidentdb`): salva in tempo reale ogni identify
   (spell/pergamena) in `nebbie-ident-db.lua` condiviso; cerca per nome e
   incrocia con l’equip in cache (`nidentdb where`).
+- **Archivio know monster** (`nknowdb`): salva il blocco di `cast 'know monster'`
+  in `nebbie-know-db.lua` condiviso; cerca per nome/razza/hate/susc.
 - **Evidenziazioni testo**: gemme/metalli + aura/disarm/sanc/dig/`<impugnato>`
   (stile dadomud); `text_highlights` e suoni opzionali in `nebbie-dash-sounds.txt`.
 - **Corretto (bug al primo avvio dopo installazione pulita)**: poteva
@@ -208,6 +210,9 @@ ALIASES = [
     ("nebbie-dash-ident-db", "^nidentdb$", "NebbieDash.cmdIdentDb(\"\")"),
     ("nebbie-dash-ident-db-args", "^nidentdb (.+)$", "NebbieDash.cmdIdentDb(matches[2])"),
     ("nebbie-dash-ident-db-reload", "^nidentdbreload$", "NebbieDash.cmdReloadIdentDb()"),
+    ("nebbie-dash-know-db", "^nknowdb$", "NebbieDash.cmdKnowDb(\"\")"),
+    ("nebbie-dash-know-db-args", "^nknowdb (.+)$", "NebbieDash.cmdKnowDb(matches[2])"),
+    ("nebbie-dash-know-db-reload", "^nknowdbreload$", "NebbieDash.cmdReloadKnowDb()"),
     ("nebbie-dash-package-update", "^npackageupdate(?: (force|forza))?$",
      "NebbieDash.cmdPackageUpdate(matches[2])"),
 ]

@@ -94,6 +94,9 @@ Nessun alias invia comandi al MUD in automatico all'avvio (scelta deliberata, ve
 | `nidentdb hold <NomePg>` | Dopo un `drop`: assegna l’oggetto lasciato in terra a un PG. |
 | `nidentdb hold <oggetto> <NomePg>` | Assegna possesso senza drop pendente. |
 | `nidentdbreload` | Ricarica l’archivio identify dal disco. |
+| `nknowdb [query]` | Cerca nell’archivio **know monster** condiviso (`nebbie-know-db.lua`). |
+| `nknowdb race <razza>` | Filtra per razza. |
+| `nknowdbreload` | Ricarica l’archivio know monster dal disco. |
 
 ## Evidenziazioni testo (gemme / combat / dig)
 
@@ -135,8 +138,23 @@ nidentdbreload
 ```
 
 `where` mostra anche il possesso tracciato e l’incrocio con la cache equip (serve aver fatto
-`nresync`/`neq` sui PG rilevanti). Know-monster arriverà in un secondo passo sullo stesso
-schema di storage condiviso.
+`nresync`/`neq` sui PG rilevanti).
+
+## Archivio know monster (`nknowdb`)
+
+Dalla **1.15.55** ogni `cast 'know monster'` riuscito su un NPC aggiorna
+`profiles/ndashboard/nebbie-know-db.lua` (condiviso tra profili). Formato dal server
+(`spell_know_monster`): razza, poi a seconda del livello caster exp / livello guerriero /
+hate / hp / susc / resist / immune / attacchi / dado danno (numeri approssimati).
+
+```
+nknowdb goblin
+nknowdb race Goblinoid
+nknowdbreload
+```
+
+I campi non rivelati dal cast corrente restano quelli di cast precedenti (merge).
+Colori / testo aggiuntivo in output stile dadomud: in seguito, con criteri dedicati.
 
 ## Cambio arma (`usa`)
 
@@ -244,6 +262,7 @@ GreenBlade,egida foresta EDGreenBlade,34512,15809
 | `nidentbatch greenblade` | Solo righe del toon indicato |
 | `nidentbatchreload` | Ricarica `nebbie-ident-batch-commands.txt` e CSV input |
 | `nidentdb …` | Archivio identify live (vedi sezione dedicata sopra) |
+| `nknowdb …` | Archivio know monster live (vedi sezione dedicata sopra) |
 
 ### Identify batch (`nidentbatch`) — solo Sirio connesso
 
