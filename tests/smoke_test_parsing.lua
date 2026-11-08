@@ -866,31 +866,22 @@ wdata.eqUpdated = false
 NebbieDash.cmdSwapWeapon(1)
 check("armi: cmdSwapWeapon senza equip sincronizzato non invia nulla (nessuno zaino noto)", #sentLog == 0)
 
--- Test 20: bug segnalato (2026-08-10) — "lo split è di nuovo partito mentre
--- ero solo". Analisi: loot quasi simultanei (es. piu' uccisioni ravvicinate
--- da un incantesimo ad area) potevano avviare DUE controlli gruppo in
--- parallelo, e la risposta "group" del primo (magari da solo) poteva
--- chiudere anche il controllo del secondo (magari in gruppo) senza
--- verificare a quale generazione appartenesse davvero. Fix: se un
--- controllo e' gia' attivo, il nuovo importo si accumula in quello in
--- corso invece di avviarne un secondo.
+-- Test 20: autosplit senza probe "group" (1.15.57) — split diretto.
 NebbieDash.setCurrentCharacter("NomiyaMaki", true)
 NebbieDash.autoSplit = true
 NebbieDash._groupCheckActive = false
 NebbieDash._pendingSplitAmount = nil
 sentLog = {}
 NebbieDash.startSplitFlow(100)
-check("split: primo loot avvia il controllo gruppo ('group' inviato)", sentLog[#sentLog] == "group")
-check("split: importo in sospeso registrato", NebbieDash._pendingSplitAmount == 100)
+check("split: primo loot invia split diretto", sentLog[#sentLog] == "split 100")
 sentLog = {}
 NebbieDash.startSplitFlow(50)
-check("split: secondo loot mentre il controllo e' attivo NON invia un secondo 'group'", #sentLog == 0)
-check("split: l'importo del secondo loot si accumula nel controllo in corso", NebbieDash._pendingSplitAmount == 150)
-sentLog = {}
-line = "But you are a member of no group?!"
-NebbieDash.onGroupSoloLine()
-check("split: risposta 'da solo' non invia alcuno split (importo combinato scartato)", #sentLog == 0)
-check("split: controllo gruppo chiuso dopo la risposta", NebbieDash._groupCheckActive == false)
+check("split: secondo loot invia altro split (niente group)",
+  #sentLog == 1 and sentLog[1] == "split 50")
+local anyGroup = false
+for _, s in ipairs(sentLog) do if s == "group" then anyGroup = true end end
+check("split: nessun 'group' inviato", anyGroup == false)
+check("split: nessun pending group check", NebbieDash._groupCheckActive == false)
 
 -- Test 21: secondo formato REALE di fine combattimento (uccisione in
 -- solitaria): "La tua esperienza e' aumentata di N punti." — testo fornito
