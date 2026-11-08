@@ -84,6 +84,39 @@ Nessun alias invia comandi al MUD in automatico all'avvio (scelta deliberata, ve
 | `nautofeed <on\|off>` | Attiva/disattiva la macro automatica fame/sete (default **on**), vedi sotto. |
 | `nhungermacros` | Ricarica le macro fame/sete dal file di configurazione dopo averlo modificato (vedi sotto), senza riavviare Mudlet. |
 | `nitemkeywords` | Ricarica le parole chiave per oggetto (condivise tra tutti i personaggi) dal file di configurazione dopo averlo modificato (vedi sotto), senza riavviare Mudlet. |
+| `nidentdb [query]` | Cerca nell’archivio **identify** condiviso (`profiles/ndashboard/nebbie-ident-db.lua`). Si aggiorna da solo a ogni identify (spell o pergamena) di qualsiasi PG. |
+| `nidentdb where <query>` | Come sopra + possesso + chi ha l’oggetto in equip (cache `eq` / `nresync`). |
+| `nidentdb char <nome>` | Identify / possesso di quel personaggio. |
+| `nidentdb hold <NomePg>` | Dopo un `drop`: assegna l’oggetto lasciato in terra a un PG. |
+| `nidentdb hold <oggetto> <NomePg>` | Assegna possesso senza drop pendente. |
+| `nidentdbreload` | Ricarica l’archivio identify dal disco. |
+
+## Archivio identify (`nidentdb`)
+
+Ogni volta che un personaggio fa `cast 'identify'` / `reci …` di una pergamena di
+identificazione, NebbieDash cattura il blocco che inizia con `La conoscenza ti pervade:`
+e lo salva in **`profiles/ndashboard/nebbie-ident-db.lua`** (stessa cartella condivisa di
+preferenze e cache PG). Non serve un comando per “salvare”: è automatico e silenzioso.
+
+**Possesso**:
+- `give …` → messaggio `Dai il … a Sirio.` trasferisce il possesso al destinatario.
+- `drop …` → messaggio `Posi il ….` marca **oggetto lasciato in terra** e chiede
+  `nidentdb hold <NomePg>` per indicare chi lo avrà in inventario.
+
+Consultazione:
+
+```
+nidentdb mantello
+nidentdb where mantello
+nidentdb char NomiyaMaki
+nidentdb hold Sirio
+nidentdb hold mantello Mirari
+nidentdbreload
+```
+
+`where` mostra anche il possesso tracciato e l’incrocio con la cache equip (serve aver fatto
+`nresync`/`neq` sui PG rilevanti). Know-monster arriverà in un secondo passo sullo stesso
+schema di storage condiviso.
 
 ## Cambio arma (`usa`)
 
@@ -190,6 +223,7 @@ GreenBlade,egida foresta EDGreenBlade,34512,15809
 | `nidentbatch` | Identify batch: stesso CSV input, output unico CSV risultati |
 | `nidentbatch greenblade` | Solo righe del toon indicato |
 | `nidentbatchreload` | Ricarica `nebbie-ident-batch-commands.txt` e CSV input |
+| `nidentdb …` | Archivio identify live (vedi sezione dedicata sopra) |
 
 ### Identify batch (`nidentbatch`) — solo Sirio connesso
 

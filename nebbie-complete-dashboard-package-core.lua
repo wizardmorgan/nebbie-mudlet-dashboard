@@ -9,7 +9,7 @@
 -- docs/mudlet/analysis/RECOMMENDATION.md. Pattern prompt/eq basati su dati reali
 -- forniti dall'utente (docs/mudlet/analysis/Q&A.md, Round 3).
 
-local PKG_VER = "1.15.50"
+local PKG_VER = "1.15.51"
 
 local _prevPkgVer = NebbieDash and NebbieDash._loadedVer
 -- Non uscire in anticipo dal chunk core (alias/trigger del package possono essere
@@ -868,6 +868,7 @@ NebbieDash.SHORTCUT_RESERVED = {
   nautostand = true, nautodisarm = true, nautofeed = true, nhungermacros = true, nitemkeywords = true,
   nforgetspell = true, nbatch = true, nbatchreload = true, nbatchverify = true,
   nidentbatch = true, nidentbatchreload = true, nspellaliases = true, nspellaliasesreload = true,
+  nidentdb = true, nidentdbreload = true,
   usa = true,
   nconfigdir = true,
   nsidebar = true,
@@ -2172,6 +2173,12 @@ NebbieDash.HELP_TEXT = {
   { "nidentbatch [nome-toon]", "Identify batch: oload $3, stat/identify/junk con $o (keyword oload)." },
   { "nidentbatch resume [nome-toon]", "Riprende identify batch saltando righe gia' nel CSV di oggi." },
   { "nidentbatchreload", "Ricarica nebbie-ident-batch-commands.txt e nebbie-batch-items.csv." },
+  { "nidentdb [query]", "Cerca nell'archivio identify condiviso (profiles/ndashboard)." },
+  { "nidentdb where <query>", "Come nidentdb + possesso + chi ha l'oggetto in equip (cache eq)." },
+  { "nidentdb char <nome>", "Identify / possesso di quel personaggio." },
+  { "nidentdb hold <NomePg>", "Dopo un drop: assegna l'oggetto a terra a un PG." },
+  { "nidentdb hold <ogg> <Pg>", "Assegna possesso identify a un PG (senza drop pendente)." },
+  { "nidentdbreload", "Ricarica nebbie-ident-db.lua dalla cartella condivisa." },
   { "identify <arma>", "(comando di gioco) Rileva il tipo di danno (slash/blunt/pierce) per usa/disarmo." },
   { "nhelp", "Mostra/nascondi questa finestra." },
 }
@@ -3033,6 +3040,693 @@ function NebbieDash.onIdentifyDamageLine()
   NebbieDash.refreshDashboard()
 end
 
+-- ---------------------------------------------------------------------------
+-- Archivio identify condiviso (profiles/ndashboard/nebbie-ident-db.lua)
+--
+-- Ogni volta che un personaggio fa identify (spell o pergamena), il blocco
+-- "La conoscenza ti pervade: … Vieni sopraffatt…" viene catturato e salvato
+-- in un DB comune a tutti i profili Mudlet. Persistenza deferred/coalesced
+-- (tempTimer) per non lagare il gioco; i trigger catch-all (^) restano
+-- disabilitati fuori dalla cattura (stesso schema di eq/attrib).
+-- ---------------------------------------------------------------------------
+NebbieDash.identDb = NebbieDash.identDb or { entries = {} }
+NebbieDash.IDENT_DB_SAVE_DELAY = 0.2
+NebbieDash.IDENT_CAPTURE_TIMEOUT = 3
+-- Hint fonte (spell/scroll) valido solo pochi secondi prima di "La conoscenza…".
+NebbieDash.IDENT_SOURCE_HINT_TTL = 8
+
+function NebbieDash.identDbPath()
+  return NebbieDash.configPath("nebbie-ident-db.lua")
+end
+
+function NebbieDash.loadIdentDb()
+  NebbieDash.ensureConfigDir()
+  NebbieDash.identDb = NebbieDash.identDb or { entries = {} }
+  NebbieDash.identDb.entries = NebbieDash.identDb.entries or {}
+  local path = NebbieDash.identDbPath()
+  if type(io.exists) == "function" and io.exists(path) then
+    local loaded = {}
+    local ok = pcall(function() table.load(path, loaded) end)
+    if ok and type(loaded.entries) == "table" then
+      NebbieDash.identDb = loaded
+      NebbieDash.identDb.entries = NebbieDash.identDb.entries or {}
+    elseif ok and type(loaded) == "table" and loaded.objectName then
+      -- file corrotto/parziale: ignora
+    end
+  end
+end
+
+function NebbieDash.saveIdentDb()
+  if not NebbieDash.persistEnabled then return end
+  NebbieDash.ensureConfigDir()
+  NebbieDash.identDb = NebbieDash.identDb or { entries = {} }
+  pcall(function() table.save(NebbieDash.identDbPath(), NebbieDash.identDb) end)
+end
+
+function NebbieDash.flushIdentDbSave()
+  NebbieDash._identDbSavePending = false
+  NebbieDash._identDbSaveTimer = nil
+  NebbieDash.saveIdentDb()
+end
+
+function NebbieDash.scheduleIdentDbSave()
+  if NebbieDash._identDbSavePending then return end
+  NebbieDash._identDbSavePending = true
+  if type(tempTimer) == "function" then
+    NebbieDash._identDbSaveTimer = tempTimer(NebbieDash.IDENT_DB_SAVE_DELAY or 0.2, function()
+      NebbieDash.flushIdentDbSave()
+    end)
+  else
+    NebbieDash.flushIdentDbSave()
+  end
+end
+
+function NebbieDash.normalizeIdentObjectKey(name)
+  return ((name or ""):lower():match("^%s*(.-)%s*$")) or ""
+end
+
+-- Parser completo del blocco identify (spell o pergamena). Accetta sia il
+-- formato mortale (senza V-Number) sia quello immortale/batch.
+function NebbieDash.parseIdentifyFull(lines)
+  local entry = {
+    objectName = nil,
+    objectType = nil,
+    flags = nil,
+    vnumOriginario = nil,
+    weight = nil,
+    value = nil,
+    rent = nil,
+    rare = false,
+    acApply = nil,
+    damageDice = nil,
+    damageType = nil,
+    affects = {},
+  }
+  for _, raw in ipairs(lines or {}) do
+    local text = NebbieDash.stripColors(raw or ""):match("^%s*(.-)%s*$") or ""
+    if text == "" then
+      -- skip
+    else
+      if not entry.objectName then
+        local n, t, v = text:match(
+          "^Oggetto: '([^']+)', Tipo di Oggetto (%S+) V%-Number Originario: (%d+)%s*$")
+        if n then
+          entry.objectName, entry.objectType, entry.vnumOriginario = n, t, v
+        else
+          n, t = text:match("^Oggetto: '([^']+)', Tipo di Oggetto (%S+)%s*$")
+          if n then
+            entry.objectName, entry.objectType = n, t
+          end
+        end
+      end
+      if not entry.vnumOriginario then
+        entry.vnumOriginario = text:match("V%-Number Originario:%s*(%d+)")
+      end
+      if not entry.flags then
+        entry.flags = text:match("^L'oggetto e':%s*(.-)%s*$")
+        if entry.flags then
+          entry.flags = entry.flags:match("^%s*(.-)%s*$")
+        end
+      end
+      local w, val, rent = text:match(
+        "^Peso:%s*([%d%.]+),%s*Valore:%s*([%d%.]+),%s*Costo di rent:%s*([%d%.]+)")
+      if w then
+        entry.weight = tonumber(w)
+        entry.value = tonumber(val)
+        entry.rent = tonumber(rent)
+        if text:find("%[RARO%]", 1) then entry.rare = true end
+      end
+      local ac = text:match("^AC%-apply di ([%d%.]+)%.%s*$")
+      if ac then entry.acApply = tonumber(ac) end
+      local dice = text:match("^Dado di danno:%s*'([^']+)'")
+      if dice then entry.damageDice = dice end
+      local dmg = text:match("^Tipo di danno:%s*'([^']+)'")
+      if dmg then entry.damageType = dmg end
+      local aff = text:match("Ti puo' dare%s*:%s*(.-)%s*$")
+      if aff and aff ~= "" then
+        table.insert(entry.affects, aff)
+      end
+    end
+  end
+  if not entry.objectName or entry.objectName == "" then return nil end
+  if not entry.objectType or entry.objectType == "" then return nil end
+  return entry
+end
+
+function NebbieDash.upsertIdentRecord(parsed, character, source)
+  if not parsed or not parsed.objectName then return nil end
+  local key = NebbieDash.normalizeIdentObjectKey(parsed.objectName)
+  if key == "" then return nil end
+  NebbieDash.identDb = NebbieDash.identDb or { entries = {} }
+  NebbieDash.identDb.entries = NebbieDash.identDb.entries or {}
+  local now = os.time()
+  local existing = NebbieDash.identDb.entries[key] or {}
+  existing.key = key
+  existing.objectName = parsed.objectName
+  existing.objectType = parsed.objectType
+  existing.flags = parsed.flags
+  existing.vnumOriginario = parsed.vnumOriginario
+  existing.weight = parsed.weight
+  existing.value = parsed.value
+  existing.rent = parsed.rent
+  existing.rare = parsed.rare and true or false
+  existing.acApply = parsed.acApply
+  existing.damageDice = parsed.damageDice
+  existing.damageType = parsed.damageType
+  existing.affects = parsed.affects or {}
+  existing.lastAt = now
+  existing.lastCharacter = character or existing.lastCharacter or "unknown"
+  existing.lastSource = source or existing.lastSource
+  existing.byCharacter = existing.byCharacter or {}
+  local who = character or "unknown"
+  existing.byCharacter[who] = {
+    at = now,
+    source = source or existing.byCharacter[who] and existing.byCharacter[who].source,
+  }
+  -- Identify implica che il PG ha l'oggetto a portata: aggiorna possesso.
+  existing.possession = {
+    status = "held",
+    character = who,
+    at = now,
+    via = "identify",
+    from = existing.possession and existing.possession.character,
+    displaySeen = existing.possession and existing.possession.displaySeen,
+  }
+  NebbieDash.identDb.entries[key] = existing
+  NebbieDash.scheduleIdentDbSave()
+  return existing
+end
+
+-- Normalizza il nome oggetto da messaggi give/drop (articoli, dall'/dell', …)
+-- per poterlo confrontare con la keyword da identify.
+function NebbieDash.normalizeIdentItemText(text)
+  text = NebbieDash.stripColors(text or ""):lower()
+  text = text:match("^%s*(.-)%s*$") or ""
+  text = text:gsub("^l'", ""):gsub("^un'", "")
+  text = text:gsub("^il%s+", ""):gsub("^la%s+", ""):gsub("^lo%s+", "")
+  text = text:gsub("^un%s+", ""):gsub("^una%s+", ""):gsub("^uno%s+", "")
+  text = text:gsub("^gli%s+", ""):gsub("^le%s+", ""):gsub("^i%s+", "")
+  text = text:gsub("dall'", " "):gsub("dell'", " "):gsub("all'", " "):gsub("nell'", " ")
+  text = text:gsub("%sdal%s+", " "):gsub("%sdel%s+", " "):gsub("%sal%s+", " ")
+  text = text:gsub("%s+", " ")
+  return text:match("^%s*(.-)%s*$") or ""
+end
+
+function NebbieDash.identTokenSet(text)
+  local set = {}
+  for w in NebbieDash.normalizeIdentItemText(text):gmatch("%S+") do
+    if #w >= 3 then set[w] = true end
+  end
+  return set
+end
+
+function NebbieDash.identTokenOverlapScore(a, b)
+  local sa, sb = NebbieDash.identTokenSet(a), NebbieDash.identTokenSet(b)
+  local n = 0
+  for w, _ in pairs(sa) do
+    if sb[w] then n = n + 1 end
+  end
+  return n
+end
+
+-- Trova la migliore entry in archivio per un testo give/drop/eq.
+function NebbieDash.matchIdentEntryByItemText(itemText)
+  local needle = NebbieDash.normalizeIdentItemText(itemText)
+  if needle == "" then return nil, 0 end
+  local best, bestScore = nil, 0
+  for _, entry in pairs((NebbieDash.identDb and NebbieDash.identDb.entries) or {}) do
+    local score = NebbieDash.identTokenOverlapScore(needle, entry.objectName or "")
+    if entry.possession and entry.possession.displaySeen then
+      local alt = NebbieDash.identTokenOverlapScore(needle, entry.possession.displaySeen)
+      if alt > score then score = alt end
+    end
+    if score > bestScore then
+      best, bestScore = entry, score
+    end
+  end
+  if bestScore < 1 then return nil, 0 end
+  return best, bestScore
+end
+
+function NebbieDash.setIdentPossession(entry, status, character, via, displaySeen, fromChar)
+  if not entry then return nil end
+  local now = os.time()
+  local prev = entry.possession and entry.possession.character
+  entry.possession = {
+    status = status or "unknown",
+    character = (status == "held") and character or nil,
+    at = now,
+    via = via,
+    from = fromChar or prev,
+    displaySeen = displaySeen or (entry.possession and entry.possession.displaySeen),
+  }
+  if status == "held" and character and character ~= "" then
+    entry.byCharacter = entry.byCharacter or {}
+    entry.byCharacter[character] = entry.byCharacter[character] or { at = now }
+    entry.byCharacter[character].at = now
+  end
+  NebbieDash.scheduleIdentDbSave()
+  return entry
+end
+
+function NebbieDash.parseGiveLine(text)
+  text = NebbieDash.stripColors(text or ""):match("^%s*(.-)%s*$") or ""
+  local item, target = text:match("^Dai%s+(.+)%s+a%s+(%S+)%.%s*$")
+  if not item or not target then return nil end
+  return { item = item, target = target }
+end
+
+function NebbieDash.parseDropLine(text)
+  text = NebbieDash.stripColors(text or ""):match("^%s*(.-)%s*$") or ""
+  local item = text:match("^Posi%s+(.+)%.%s*$")
+  if not item then return nil end
+  return { item = item }
+end
+
+function NebbieDash.onIdentGiveLine()
+  local text = line or (type(getCurrentLine) == "function" and getCurrentLine()) or ""
+  local parsed = NebbieDash.parseGiveLine(text)
+  if not parsed then return end
+  local entry = select(1, NebbieDash.matchIdentEntryByItemText(parsed.item))
+  if not entry then return end
+  local fromChar = NebbieDash.currentChar or (entry.possession and entry.possession.character)
+  NebbieDash.setIdentPossession(entry, "held", parsed.target, "give", parsed.item, fromChar)
+  cecho(string.format(
+    "<green>[NebbieDash] Ident: <white>%s<green> passato a <yellow>%s<green> (da %s).\n",
+    entry.objectName or parsed.item, parsed.target, tostring(fromChar or "?")))
+end
+
+function NebbieDash.onIdentDropLine()
+  local text = line or (type(getCurrentLine) == "function" and getCurrentLine()) or ""
+  local parsed = NebbieDash.parseDropLine(text)
+  if not parsed then return end
+  local entry = select(1, NebbieDash.matchIdentEntryByItemText(parsed.item))
+  if not entry then return end
+  local fromChar = NebbieDash.currentChar or (entry.possession and entry.possession.character)
+  NebbieDash.setIdentPossession(entry, "ground", nil, "drop", parsed.item, fromChar)
+  NebbieDash._identDropPending = {
+    key = entry.key,
+    objectName = entry.objectName,
+    displaySeen = parsed.item,
+    from = fromChar,
+    at = os.time(),
+  }
+  cecho(string.format(
+    "<orange>[NebbieDash] Ident: <white>%s<orange> → oggetto lasciato in terra (da %s).\n",
+    entry.objectName or parsed.item, tostring(fromChar or "?")))
+  cecho("<grey>Chi lo raccoglie? Digita <yellow>nidentdb hold <NomePg><grey> (es. <yellow>nidentdb hold Sirio<grey>).\n")
+end
+
+function NebbieDash.cmdIdentDbHold(charName)
+  charName = (charName or ""):match("^%s*(.-)%s*$") or ""
+  if charName == "" then
+    cecho("<orange>[NebbieDash] Uso: <yellow>nidentdb hold <NomePg><orange> — assegna l'oggetto lasciato in terra.\n")
+    return
+  end
+  local pending = NebbieDash._identDropPending
+  if not pending or not pending.key then
+    cecho("<orange>[NebbieDash] Nessun drop in attesa. Fai un <white>drop<orange> di un oggetto già in archivio identify, oppure <yellow>nidentdb hold <oggetto> <NomePg><orange>.\n")
+    return
+  end
+  local entry = NebbieDash.identDb.entries and NebbieDash.identDb.entries[pending.key]
+  if not entry then
+    NebbieDash._identDropPending = nil
+    cecho("<orange>[NebbieDash] Entry identify del drop non trovata più in archivio.\n")
+    return
+  end
+  NebbieDash.setIdentPossession(entry, "held", charName, "hold", pending.displaySeen, pending.from)
+  NebbieDash._identDropPending = nil
+  cecho(string.format(
+    "<green>[NebbieDash] Ident: <white>%s<green> ora in possesso di <yellow>%s<green>.\n",
+    entry.objectName or "?", charName))
+end
+
+function NebbieDash.cmdIdentDbHoldExplicit(objectQuery, charName)
+  objectQuery = (objectQuery or ""):match("^%s*(.-)%s*$") or ""
+  charName = (charName or ""):match("^%s*(.-)%s*$") or ""
+  if objectQuery == "" or charName == "" then
+    cecho("<orange>[NebbieDash] Uso: <yellow>nidentdb hold <oggetto> <NomePg>\n")
+    return
+  end
+  local results = NebbieDash.searchIdentDb(objectQuery)
+  if not results or #results == 0 then
+    local entry = select(1, NebbieDash.matchIdentEntryByItemText(objectQuery))
+    if entry then results = { entry } end
+  end
+  if not results or #results == 0 then
+    cecho("<orange>[NebbieDash] Nessun identify per <white>" .. objectQuery .. "\n")
+    return
+  end
+  local entry = results[1]
+  local fromChar = entry.possession and entry.possession.character
+  NebbieDash.setIdentPossession(entry, "held", charName, "hold", objectQuery, fromChar)
+  if NebbieDash._identDropPending and NebbieDash._identDropPending.key == entry.key then
+    NebbieDash._identDropPending = nil
+  end
+  cecho(string.format(
+    "<green>[NebbieDash] Ident: <white>%s<green> ora in possesso di <yellow>%s<green>.\n",
+    entry.objectName or "?", charName))
+end
+
+function NebbieDash.noteIdentSourceHint(source)
+  if not source or source == "" then return end
+  NebbieDash._identSourceHint = { source = source, at = os.time() }
+end
+
+function NebbieDash.consumeIdentSourceHint()
+  local hint = NebbieDash._identSourceHint
+  NebbieDash._identSourceHint = nil
+  if not hint or not hint.at then return nil end
+  if (os.time() - hint.at) > (NebbieDash.IDENT_SOURCE_HINT_TTL or 8) then
+    return nil
+  end
+  return hint.source
+end
+
+function NebbieDash.onIdentSourceSpellLine()
+  local text = line or (type(getCurrentLine) == "function" and getCurrentLine()) or ""
+  text = NebbieDash.stripColors(text)
+  if text:find("Pronunci le parole, 'identify'", 1, true)
+      or text:find('Pronunci le parole, "identify"', 1, true) then
+    NebbieDash.noteIdentSourceHint("spell")
+  end
+end
+
+function NebbieDash.onIdentSourceScrollLine()
+  local text = line or (type(getCurrentLine) == "function" and getCurrentLine()) or ""
+  text = NebbieDash.stripColors(text)
+  if text:find("pergamena di identificazione", 1, true) then
+    NebbieDash.noteIdentSourceHint("scroll")
+  end
+end
+
+function NebbieDash.isIdentFatigueLine(text)
+  text = NebbieDash.stripColors(text or "")
+  return text:match("^Vieni sopraffatt[oa] da un'ondata di stanchezza%.%s*$") ~= nil
+end
+
+function NebbieDash.armIdentCaptureWatchdog(gen)
+  if type(tempTimer) ~= "function" then return end
+  tempTimer(NebbieDash.IDENT_CAPTURE_TIMEOUT or 3, function()
+    local cap = NebbieDash._identCapture
+    if not cap or NebbieDash._identCaptureGen ~= gen then return end
+    if cap.activity ~= cap.watchedActivity then
+      cap.watchedActivity = cap.activity
+      NebbieDash.armIdentCaptureWatchdog(gen)
+    else
+      NebbieDash.finishIdentArchiveCapture()
+    end
+  end)
+end
+
+function NebbieDash.startIdentArchiveCapture()
+  if NebbieDash._identCapture then
+    NebbieDash.finishIdentArchiveCapture()
+  end
+  NebbieDash._identCaptureGen = (NebbieDash._identCaptureGen or 0) + 1
+  local gen = NebbieDash._identCaptureGen
+  NebbieDash._identCapture = {
+    lines = {},
+    character = NebbieDash.currentChar or "unknown",
+    source = NebbieDash.consumeIdentSourceHint(),
+    activity = 0,
+    watchedActivity = 0,
+    startedAt = os.time(),
+  }
+  if NebbieDash._identLineTrig then
+    pcall(enableTrigger, NebbieDash._identLineTrig)
+  end
+  NebbieDash.armIdentCaptureWatchdog(gen)
+end
+
+function NebbieDash.onIdentKnowledgeLine()
+  NebbieDash.startIdentArchiveCapture()
+end
+
+function NebbieDash.onIdentArchiveLine()
+  local cap = NebbieDash._identCapture
+  if not cap then
+    if NebbieDash._identLineTrig then pcall(disableTrigger, NebbieDash._identLineTrig) end
+    return
+  end
+  local text = line or (type(getCurrentLine) == "function" and getCurrentLine()) or ""
+  text = NebbieDash.stripColors(text or "")
+  local trimmed = text:match("^%s*(.-)%s*$") or ""
+  if NebbieDash.isIdentFatigueLine(trimmed) then
+    NebbieDash.finishIdentArchiveCapture()
+    return
+  end
+  if NebbieDash.isAnyPromptLine(trimmed) then
+    NebbieDash.finishIdentArchiveCapture()
+    return
+  end
+  if trimmed ~= "" then
+    table.insert(cap.lines, trimmed)
+    cap.activity = (cap.activity or 0) + 1
+  end
+end
+
+function NebbieDash.finishIdentArchiveCapture()
+  local cap = NebbieDash._identCapture
+  NebbieDash._identCapture = nil
+  if NebbieDash._identLineTrig then
+    pcall(disableTrigger, NebbieDash._identLineTrig)
+  end
+  if not cap then return end
+  local parsed = NebbieDash.parseIdentifyFull(cap.lines)
+  if not parsed then return end
+  NebbieDash.upsertIdentRecord(parsed, cap.character, cap.source)
+end
+
+function NebbieDash.identDbEntryCount()
+  local n = 0
+  for _ in pairs((NebbieDash.identDb and NebbieDash.identDb.entries) or {}) do
+    n = n + 1
+  end
+  return n
+end
+
+function NebbieDash.searchIdentDb(query)
+  query = (query or ""):lower():match("^%s*(.-)%s*$") or ""
+  local results = {}
+  for _, entry in pairs((NebbieDash.identDb and NebbieDash.identDb.entries) or {}) do
+    if query == "" then
+      table.insert(results, entry)
+    else
+      local possChar = entry.possession and entry.possession.character or ""
+      local possStatus = entry.possession and entry.possession.status or ""
+      local hay = table.concat({
+        entry.objectName or "",
+        entry.objectType or "",
+        entry.flags or "",
+        entry.vnumOriginario or "",
+        table.concat(entry.affects or {}, " "),
+        entry.lastCharacter or "",
+        possChar,
+        possStatus,
+        entry.possession and entry.possession.displaySeen or "",
+      }, " "):lower()
+      if hay:find(query, 1, true) then
+        table.insert(results, entry)
+      end
+    end
+  end
+  table.sort(results, function(a, b)
+    return (a.objectName or "") < (b.objectName or "")
+  end)
+  return results
+end
+
+function NebbieDash.listIdentDbByCharacter(charName)
+  charName = (charName or ""):match("^%s*(.-)%s*$") or ""
+  local needle = charName:lower()
+  local results = {}
+  for _, entry in pairs((NebbieDash.identDb and NebbieDash.identDb.entries) or {}) do
+    local by = entry.byCharacter or {}
+    local hit = false
+    if needle == "" then
+      hit = true
+    else
+      for who, _ in pairs(by) do
+        if who:lower() == needle or who:lower():find(needle, 1, true) then
+          hit = true
+          break
+        end
+      end
+      if not hit and entry.lastCharacter
+          and entry.lastCharacter:lower():find(needle, 1, true) then
+        hit = true
+      end
+      local pc = entry.possession and entry.possession.character
+      if not hit and pc and pc:lower():find(needle, 1, true) then
+        hit = true
+      end
+    end
+    if hit then table.insert(results, entry) end
+  end
+  table.sort(results, function(a, b)
+    return (a.lastAt or 0) > (b.lastAt or 0)
+  end)
+  return results
+end
+
+-- Incrocia nome identify con la cache eq dei personaggi (neq/nresync).
+function NebbieDash.findIdentEqHolders(objectName)
+  local key = NebbieDash.normalizeIdentObjectKey(objectName)
+  local holders = {}
+  if key == "" then return holders end
+  for charName, data in pairs(NebbieDash.chars or {}) do
+    for slot, entry in pairs((data and data.eq) or {}) do
+      local item = type(entry) == "table" and (entry.item or "") or tostring(entry or "")
+      local loc = type(entry) == "table" and (entry.location or slot) or slot
+      if item ~= "" then
+        local itemLow = item:lower()
+        if itemLow == key
+            or itemLow:find(key, 1, true)
+            or key:find(itemLow, 1, true)
+            or NebbieDash.keywordsOverlap(item, key) then
+          table.insert(holders, {
+            character = charName,
+            location = loc,
+            item = item,
+            slot = slot,
+          })
+        end
+      end
+    end
+  end
+  table.sort(holders, function(a, b)
+    if a.character == b.character then
+      return tostring(a.location) < tostring(b.location)
+    end
+    return a.character < b.character
+  end)
+  return holders
+end
+
+function NebbieDash.formatIdentDbEntry(entry, withHolders)
+  if not entry then return {} end
+  local lines = {}
+  local head = string.format("<yellow>%s<white> (%s)",
+    entry.objectName or "?", entry.objectType or "?")
+  if entry.vnumOriginario then
+    head = head .. " vnumOrig=" .. tostring(entry.vnumOriginario)
+  end
+  if entry.rare then head = head .. " <orange>[RARO]" end
+  table.insert(lines, head)
+  if entry.flags and entry.flags ~= "" then
+    table.insert(lines, "  <grey>flags:<white> " .. entry.flags)
+  end
+  local stats = {}
+  if entry.weight ~= nil then table.insert(stats, "peso " .. tostring(entry.weight)) end
+  if entry.value ~= nil then table.insert(stats, "val " .. tostring(entry.value)) end
+  if entry.rent ~= nil then table.insert(stats, "rent " .. tostring(entry.rent)) end
+  if entry.acApply ~= nil then table.insert(stats, "AC " .. tostring(entry.acApply)) end
+  if entry.damageDice then table.insert(stats, "dado " .. entry.damageDice) end
+  if entry.damageType then table.insert(stats, "dmg " .. entry.damageType) end
+  if #stats > 0 then
+    table.insert(lines, "  <grey>stats:<white> " .. table.concat(stats, ", "))
+  end
+  if entry.affects and #entry.affects > 0 then
+    table.insert(lines, "  <grey>affects:<white> " .. table.concat(entry.affects, " | "))
+  end
+  local when = entry.lastAt and os.date("%Y-%m-%d %H:%M", entry.lastAt) or "?"
+  local src = entry.lastSource and (" (" .. entry.lastSource .. ")") or ""
+  table.insert(lines, string.format(
+    "  <grey>ultimo ident:<white> %s%s <grey>@ %s",
+    tostring(entry.lastCharacter or "?"), src, when))
+  local poss = entry.possession
+  if poss then
+    local pwhen = poss.at and os.date("%Y-%m-%d %H:%M", poss.at) or "?"
+    if poss.status == "ground" then
+      table.insert(lines, string.format(
+        "  <orange>possesso:<white> oggetto lasciato in terra <grey>(da %s @ %s)",
+        tostring(poss.from or "?"), pwhen))
+    elseif poss.status == "held" and poss.character then
+      local via = poss.via and (" via " .. poss.via) or ""
+      table.insert(lines, string.format(
+        "  <grey>possesso:<white> %s%s <grey>@ %s",
+        poss.character, via, pwhen))
+    end
+  end
+  if withHolders then
+    local holders = NebbieDash.findIdentEqHolders(entry.objectName)
+    if #holders == 0 then
+      table.insert(lines, "  <grey>in equip:<white> (nessun match nella cache eq — prova nresync)")
+    else
+      for _, h in ipairs(holders) do
+        table.insert(lines, string.format(
+          "  <grey>in equip:<white> %s <grey>@<white> %s <grey>(%s)",
+          h.character, tostring(h.location), h.item))
+      end
+    end
+  end
+  return lines
+end
+
+function NebbieDash.cmdIdentDb(argStr)
+  argStr = (argStr or ""):match("^%s*(.-)%s*$") or ""
+  local mode, rest = argStr:match("^(%S+)%s+(.-)%s*$")
+  if not mode then
+    mode, rest = argStr, ""
+  end
+  mode = (mode or ""):lower()
+
+  if argStr == "" or mode == "help" or mode == "?" then
+    cecho("<green>[NebbieDash] Archivio identify: <white>" ..
+      tostring(NebbieDash.identDbEntryCount()) ..
+      "<green> oggetti in <white>" .. NebbieDash.identDbPath() .. "\n")
+    cecho("<grey>Uso: <yellow>nidentdb <query><grey> | <yellow>nidentdb where <query><grey> | <yellow>nidentdb char <nome>\n")
+    cecho("<grey>     <yellow>nidentdb hold <NomePg><grey> | <yellow>nidentdb hold <oggetto> <NomePg><grey> | <yellow>nidentdbreload\n")
+    cecho("<grey>Identify automatico; give trasferisce possesso; drop → terra poi hold.\n")
+    return
+  end
+
+  if mode == "hold" then
+    -- "hold Sirio" (drop pendente) oppure "hold mantello Sirio" (oggetto + PG).
+    local objPart, charPart = rest:match("^(.+)%s+(%S+)$")
+    if objPart and charPart and objPart:match("%S") then
+      NebbieDash.cmdIdentDbHoldExplicit(objPart, charPart)
+    else
+      NebbieDash.cmdIdentDbHold(rest)
+    end
+    return
+  end
+
+  local results
+  local withHolders = false
+  if mode == "where" then
+    withHolders = true
+    results = NebbieDash.searchIdentDb(rest)
+  elseif mode == "char" then
+    results = NebbieDash.listIdentDbByCharacter(rest)
+  else
+    results = NebbieDash.searchIdentDb(argStr)
+  end
+
+  if not results or #results == 0 then
+    cecho("<orange>[NebbieDash] Nessun identify in archivio per <white>" .. argStr .. "\n")
+    return
+  end
+  local limit = 25
+  cecho("<green>[NebbieDash] " .. tostring(#results) .. " identify"
+    .. (#results > limit and (" (mostro i primi " .. limit .. ")") or "")
+    .. ":\n")
+  for i, entry in ipairs(results) do
+    if i > limit then break end
+    for _, lineTxt in ipairs(NebbieDash.formatIdentDbEntry(entry, withHolders or mode == "where")) do
+      cecho(lineTxt .. "\n")
+    end
+  end
+end
+
+function NebbieDash.cmdReloadIdentDb()
+  NebbieDash.loadIdentDb()
+  cecho("<green>[NebbieDash] Ident DB ricaricato: <white>" ..
+    tostring(NebbieDash.identDbEntryCount()) ..
+    "<green> oggetti (<white>" .. NebbieDash.identDbPath() .. "<green>).\n")
+end
+
 function NebbieDash.resolveWeaponTargetFromArg(data, argStr)
   argStr = (argStr or ""):match("^%s*(.-)%s*$")
   argStr = argStr:gsub("^['\"]", ""):gsub("['\"]$", "")
@@ -3545,6 +4239,9 @@ function NebbieDash.enforceTriggerHygiene()
   if not NebbieDash._attribCapture and NebbieDash._attribLineTrig then
     pcall(disableTrigger, NebbieDash._attribLineTrig)
   end
+  if not NebbieDash._identCapture and NebbieDash._identLineTrig then
+    pcall(disableTrigger, NebbieDash._identLineTrig)
+  end
   if not NebbieDash._batch or not NebbieDash._batch.active then
     NebbieDash.batchDisableLineCapture()
   end
@@ -3560,6 +4257,11 @@ function NebbieDash.enforceTriggerHygiene()
   if NebbieDash._attribCapture and NebbieDash._attribCaptureStartedAt then
     if os.time() - NebbieDash._attribCaptureStartedAt > 12 then
       NebbieDash.finishAttribCapture()
+    end
+  end
+  if NebbieDash._identCapture and NebbieDash._identCapture.startedAt then
+    if os.time() - NebbieDash._identCapture.startedAt > 12 then
+      NebbieDash.finishIdentArchiveCapture()
     end
   end
   if NebbieDash._hungerMacroBusy and NebbieDash._hungerMacroBusySince then
@@ -4994,6 +5696,8 @@ function NebbieDash.teardownTriggers()
     NebbieDash._combatEndTrig2,
     NebbieDash._fallTrig, NebbieDash._disarmTrig, NebbieDash._hungerTrig, NebbieDash._thirstTrig,
     NebbieDash._wieldTrig, NebbieDash._identifyObjTrig, NebbieDash._identifyDmgTrig,
+    NebbieDash._identKnowledgeTrig, NebbieDash._identSourceSpellTrig, NebbieDash._identSourceScrollTrig,
+    NebbieDash._identLineTrig, NebbieDash._identGiveTrig, NebbieDash._identDropTrig,
     NebbieDash._stopUsingTrig, NebbieDash._wearBackTrig,
   }
   for _, id in ipairs(ids) do
@@ -5057,6 +5761,19 @@ function NebbieDash.installTriggers()
   NebbieDash._wearBackTrig = tempRegexTrigger("^Ti metti .+ sulle spalle%.%s*$", [[NebbieDash.onWearBackLine()]])
   NebbieDash._identifyObjTrig = tempTrigger("Tipo di Oggetto", [[NebbieDash.onIdentifyObjectLine()]])
   NebbieDash._identifyDmgTrig = tempTrigger("Tipo di danno:", [[NebbieDash.onIdentifyDamageLine()]])
+  -- Archivio identify condiviso: start su "La conoscenza…"; fonte spell/scroll
+  -- opzionale; catch-all (^) solo durante la cattura (disabilitato a riposo).
+  NebbieDash._identKnowledgeTrig = tempTrigger("La conoscenza ti pervade:",
+    [[NebbieDash.onIdentKnowledgeLine()]])
+  NebbieDash._identSourceSpellTrig = tempTrigger("Pronunci le parole, 'identify'",
+    [[NebbieDash.onIdentSourceSpellLine()]])
+  NebbieDash._identSourceScrollTrig = tempTrigger("pergamena di identificazione",
+    [[NebbieDash.onIdentSourceScrollLine()]])
+  NebbieDash._identLineTrig = tempRegexTrigger("^", [[NebbieDash.onIdentArchiveLine()]])
+  if NebbieDash._identLineTrig then pcall(disableTrigger, NebbieDash._identLineTrig) end
+  -- Possesso: give → altro PG; drop → terra + richiesta nidentdb hold.
+  NebbieDash._identGiveTrig = tempTrigger("Dai ", [[NebbieDash.onIdentGiveLine()]])
+  NebbieDash._identDropTrig = tempTrigger("Posi ", [[NebbieDash.onIdentDropLine()]])
   -- Scadenza spell (vedi SPELL_EXPIRY_PATTERNS sopra): un trigger per riga,
   -- shield su substring esatta fornita dall'utente per ognuna.
   NebbieDash._spellExpiryTrigs = {}
@@ -5119,6 +5836,7 @@ function NebbieDash.migrateSharedConfigFiles()
     "nebbie-batch-items.csv",
     "nebbie-ident-batch-commands.txt",
     "nebbie-dash-preferences.txt",
+    "nebbie-ident-db.lua",
   }
   for _, f in ipairs(files) do
     NebbieDash.migrateConfigFileIfNeeded(f)
@@ -5134,6 +5852,7 @@ function NebbieDash.boot()
   NebbieDash._lastBootTime = now
   NebbieDash.migrateSharedConfigFiles()
   NebbieDash.loadStore()
+  NebbieDash.loadIdentDb()
   NebbieDash.loadUiStore()
   NebbieDash.loadPreferences()
   NebbieDash.prefs.sidebar_mode = "dock"

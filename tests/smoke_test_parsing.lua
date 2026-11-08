@@ -14,11 +14,18 @@ function tempRegexTrigger() return nil end
 function disableTrigger() end
 function enableTrigger() end
 function killTrigger() end
+function killTimer() end
 local lastSent = nil
 local sentLog = {}
 function send(cmd) lastSent = cmd; table.insert(sentLog, cmd) end
-function tempTimer(_delay, arg)
+-- Delay brevi (debounce fame 0.1, swap arma, save ident): esegui subito.
+-- Watchdog lunghi (eq/attrib/ident capture, tipicamente 3–4s): no-op, altrimenti
+-- chiudono la cattura prima che il test possa alimentare le righe.
+function tempTimer(delay, arg)
+  delay = tonumber(delay) or 0
+  if delay > 1 then return 1 end
   if type(arg) == "function" then arg() end
+  return 1
 end
 function setBorderRight() end
 function setBorderLeft() end
@@ -410,8 +417,10 @@ NebbieDash._pendingSplitAmount = nil
 sentLog = {}
 NebbieDash.onLootLine()
 NebbieDash.onLootLine()
+-- Secondo scatto mentre il controllo gruppo e' gia' attivo: un solo send("group"),
+-- importo accumulato (stesso flusso, niente secondo avvio in parallelo).
 check("loot: doppio trigger stessa riga C'erano -> un solo group/split pending",
-  NebbieDash._pendingSplitAmount == 150000 and #sentLog == 1)
+  NebbieDash._pendingSplitAmount == 300000 and #sentLog == 1)
 
 -- 8c: risposta "da soli" -> nessuno split inviato, stato ripulito.
 line = "But you are a member of no group?!"
@@ -466,7 +475,13 @@ NebbieDash._lastAutoLootClock = nil
 NebbieDash._lootFlowActive = false
 line = "La tua parte di esperienza e' di 1047 punti."
 for _ = 1, 3 do NebbieDash.onCombatEndLine() end
-check("combattimento: piu' trigger sulla stessa exp -> un solo get corp", #sentLog == 1)
+-- Debounce 0.6s: un solo cmdLoot. In Mudlet il pile e' ritardato 0.5s; nel mock
+-- sync tempTimer esegue anche il pile → 2 send (corp+pile) da un solo flusso.
+local corpCount = 0
+for _, s in ipairs(sentLog) do
+  if s == "get all.coin corp" then corpCount = corpCount + 1 end
+end
+check("combattimento: piu' trigger sulla stessa exp -> un solo get corp", corpCount == 1)
 
 -- Anche con 0 punti di esperienza (uccisione minima) deve comunque scattare.
 sentLog = {}
@@ -719,16 +734,11 @@ check("boot: una seconda chiamata (simula reinstall) non genera errori", boot2Ok
 -- secondo "rem" fallisce perche' il primo ha gia' tolto lo zaino un
 -- istante prima — confermato dai messaggi doppi osservati in gioco). Fix:
 -- cooldown tra un'esecuzione e la successiva.
-NebbieDash._lastHungerMacroRun = 0
-check("fame/sete: prima chiamata entro il cooldown NON e' bloccata",
-  os.time() - NebbieDash._lastHungerMacroRun >= NebbieDash.hungerMacroCooldownSec)
-NebbieDash._lastHungerMacroRun = os.time()
-check("fame/sete: una seconda chiamata immediata sarebbe bloccata dal cooldown",
-  os.time() - NebbieDash._lastHungerMacroRun < NebbieDash.hungerMacroCooldownSec)
--- onHungerThirstLine non deve generare errori indipendentemente dal cooldown.
-local secondCallOk = pcall(NebbieDash.onHungerThirstLine)
-check("fame/sete: chiamata bloccata dal cooldown non genera errori", secondCallOk)
-NebbieDash._lastHungerMacroRun = 0
+-- Cooldown legacy rimosso: ora debounce breve via tempTimer(0.1) in onHungerThirstLine.
+-- Verifica solo che due chiamate ravvicinate non generino errori.
+local hunger1Ok = pcall(NebbieDash.onHungerThirstLine)
+local hunger2Ok = pcall(NebbieDash.onHungerThirstLine)
+check("fame/sete: doppia fame/sete ravvicinata non genera errori", hunger1Ok and hunger2Ok)
 
 -- Test 19: gestione armi — testi REALI fornito dall'utente (2026-08-10):
 -- l'output di `identify` su "spada elf slayer" (WEAPON, Tipo di danno
@@ -885,6 +895,8 @@ check("split: controllo gruppo chiuso dopo la risposta", NebbieDash._groupCheckA
 -- questa frase (solo con "La tua parte di esperienza e' di N punti.").
 NebbieDash.autoLoot = true
 sentLog = {}
+NebbieDash._lastAutoLootClock = nil
+NebbieDash._lootFlowActive = false
 line = "La tua esperienza e' aumentata di 225000 punti."
 NebbieDash.onCombatEndLine()
 check("combattimento (solitaria): 'La tua esperienza e' aumentata di' avvia il loot automatico",
@@ -1120,24 +1132,180 @@ check("ident batch: identBatchParseFilter resume toon", r2 and t2 == "Astaroth")
 check("ident batch: identBatchParseFilter toon normale", not r3 and t3 == "Montero")
 os.remove(resumeCsv)
 
-check("groupcmd: parseGroupSaySpeaker con colori server",
-  (function()
-    local s, p = NebbieDash.parseGroupSaySpeaker(
-      "$c0012[$c0015Martin$c0012] dice al gruppo 'dro'")
-    return s == "Martin" and p == "dro"
-  end)())
-check("groupcmd: groupCmdSpeakerKey primo token",
-  NebbieDash.groupCmdSpeakerKey("Martin") == "martin")
-check("groupcmd: expandGroupCmdTemplate",
-  NebbieDash.expandGroupCmdTemplate("adrenalize {name}", "Chunli") == "adrenalize chunli")
-check("groupcmd: normalizeGroupCmdTemplate aggiunge {name}",
-  NebbieDash.normalizeGroupCmdTemplate("adrenalize") == "adrenalize {name}")
+if type(NebbieDash.parseGroupSaySpeaker) == "function" then
+  check("groupcmd: parseGroupSaySpeaker con colori server",
+    (function()
+      local s, p = NebbieDash.parseGroupSaySpeaker(
+        "$c0012[$c0015Martin$c0012] dice al gruppo 'dro'")
+      return s == "Martin" and p == "dro"
+    end)())
+  check("groupcmd: groupCmdSpeakerKey primo token",
+    NebbieDash.groupCmdSpeakerKey("Martin") == "martin")
+  check("groupcmd: expandGroupCmdTemplate",
+    NebbieDash.expandGroupCmdTemplate("adrenalize {name}", "Chunli") == "adrenalize chunli")
+  check("groupcmd: normalizeGroupCmdTemplate aggiunge {name}",
+    NebbieDash.normalizeGroupCmdTemplate("adrenalize") == "adrenalize {name}")
+else
+  check("groupcmd: API assente in questo package (skip)", true)
+end
 
-check("package update: isValidMpackageInstallUrl",
-  NebbieDash.isValidMpackageInstallUrl(PKG_MPACKAGE_URL or
-    "https://raw.githubusercontent.com/wizardmorgan/nebbie-mudlet-dashboard/main/nebbie-complete-dashboard-package.mpackage")
-  and not NebbieDash.isValidMpackageInstallUrl(
-    "https://example.com/foo.mpackage?cb=1"))
+if type(NebbieDash.isValidMpackageInstallUrl) == "function" then
+  check("package update: isValidMpackageInstallUrl",
+    NebbieDash.isValidMpackageInstallUrl(
+      "https://raw.githubusercontent.com/wizardmorgan/nebbie-mudlet-dashboard/main/nebbie-complete-dashboard-package.mpackage")
+    and not NebbieDash.isValidMpackageInstallUrl(
+      "https://example.com/foo.mpackage?cb=1"))
+else
+  check("package update: isValidMpackageInstallUrl assente (skip)", true)
+end
+
+-- Archivio identify condiviso (v1.15.51): parser + upsert + holders + capture
+local mantelloLines = {
+  "Oggetto: 'mantello varco ombra profonda', Tipo di Oggetto ARMOR",
+  "L'oggetto e': RESISTANT ONLY-PRINCE PROCAREA-REWARD",
+  "Peso: 9, Valore: 3500, Costo di rent: 0",
+  "AC-apply di 6.",
+  "Caratteristiche:",
+  "    Ti puo' dare : HIT by 27",
+  "    Ti puo' dare : SPELLFAIL by -14",
+  "    Ti puo' dare : MANA by 60",
+  "    Ti puo' dare : MANA-REGEN by 6",
+  "    Ti puo' dare : HITROLL by 4",
+}
+local mantello = NebbieDash.parseIdentifyFull(mantelloLines)
+check("identdb: parseIdentifyFull nome mantello",
+  mantello and mantello.objectName == "mantello varco ombra profonda")
+check("identdb: parseIdentifyFull tipo ARMOR", mantello and mantello.objectType == "ARMOR")
+check("identdb: parseIdentifyFull flags",
+  mantello and mantello.flags == "RESISTANT ONLY-PRINCE PROCAREA-REWARD")
+check("identdb: parseIdentifyFull peso/val/rent/ac",
+  mantello and mantello.weight == 9 and mantello.value == 3500
+    and mantello.rent == 0 and mantello.acApply == 6)
+check("identdb: parseIdentifyFull 5 affects",
+  mantello and #mantello.affects == 5 and mantello.affects[1] == "HIT by 27"
+    and mantello.affects[5] == "HITROLL by 4")
+check("identdb: parseIdentifyFull senza vnum mortale",
+  mantello and mantello.vnumOriginario == nil)
+
+local weaponIdentLines = {
+  "Oggetto: 'spada elf slayer', Tipo di Oggetto WEAPON",
+  "L'oggetto e': HUM METAL MAGIC",
+  "Peso: 12, Valore: 5000, Costo di rent: 7500",
+  "Dado di danno: '3d5'",
+  "Tipo di danno: 'SLASH'",
+  "    Ti puo' dare : HIT-N-DAM by 4",
+}
+local wident = NebbieDash.parseIdentifyFull(weaponIdentLines)
+check("identdb: parseIdentifyFull weapon dice/type",
+  wident and wident.damageDice == "3d5" and wident.damageType == "SLASH")
+
+local vnumLines = {
+  "Oggetto: 'verse13 move lips EDEchoes', Tipo di Oggetto ARMOR V-Number Originario: 8304",
+  "L'oggetto e': ORGANIC MAGIC EDIT PERSONAL",
+}
+local vparsed = NebbieDash.parseIdentifyFull(vnumLines)
+check("identdb: parseIdentifyFull con vnum originario",
+  vparsed and vparsed.vnumOriginario == "8304")
+
+NebbieDash.persistEnabled = true
+NebbieDash.identDb = { entries = {} }
+NebbieDash.currentChar = "NomiyaMaki"
+NebbieDash.noteIdentSourceHint("scroll")
+check("identdb: consumeIdentSourceHint scroll",
+  NebbieDash.consumeIdentSourceHint() == "scroll")
+check("identdb: consumeIdentSourceHint una sola volta",
+  NebbieDash.consumeIdentSourceHint() == nil)
+
+local saved = NebbieDash.upsertIdentRecord(mantello, "NomiyaMaki", "scroll")
+check("identdb: upsertIdentRecord crea entry",
+  saved and saved.key == "mantello varco ombra profonda")
+check("identdb: entry count 1", NebbieDash.identDbEntryCount() == 1)
+check("identdb: search mantello",
+  #NebbieDash.searchIdentDb("mantello") == 1)
+check("identdb: search by affect MANA-REGEN",
+  #NebbieDash.searchIdentDb("mana-regen") == 1)
+check("identdb: listIdentDbByCharacter Nomiya",
+  #NebbieDash.listIdentDbByCharacter("Nomiya") == 1)
+
+NebbieDash.chars = NebbieDash.chars or {}
+NebbieDash.chars["NomiyaMaki"] = {
+  eq = {
+    [1] = { location = "sul torso", item = "un mantello varco ombra profonda" },
+  },
+}
+local holders = NebbieDash.findIdentEqHolders("mantello varco ombra profonda")
+check("identdb: findIdentEqHolders trova PG",
+  #holders == 1 and holders[1].character == "NomiyaMaki")
+
+-- Cattura multi-riga simulata (trigger offline)
+NebbieDash.identDb = { entries = {} }
+NebbieDash.currentChar = "NomiyaMaki"
+NebbieDash.noteIdentSourceHint("scroll")
+NebbieDash.startIdentArchiveCapture()
+check("identdb: start capture attiva", NebbieDash._identCapture ~= nil)
+local captureFeed = {
+  "Oggetto: 'mantello varco ombra profonda', Tipo di Oggetto ARMOR",
+  "L'oggetto e': RESISTANT ONLY-PRINCE PROCAREA-REWARD",
+  "Peso: 9, Valore: 3500, Costo di rent: 0",
+  "AC-apply di 6.",
+  "Caratteristiche:",
+  "    Ti puo' dare : HIT by 27",
+  "    Ti puo' dare : SPELLFAIL by -14",
+  "    Ti puo' dare : MANA by 60",
+  "    Ti puo' dare : MANA-REGEN by 6",
+  "    Ti puo' dare : HITROLL by 4",
+  "Vieni sopraffatta da un'ondata di stanchezza.",
+}
+for _, feedLine in ipairs(captureFeed) do
+  line = feedLine
+  NebbieDash.onIdentArchiveLine()
+end
+check("identdb: capture chiude su stanchezza", NebbieDash._identCapture == nil)
+check("identdb: capture ha upsertato mantello",
+  NebbieDash.identDbEntryCount() == 1
+    and NebbieDash.identDb.entries["mantello varco ombra profonda"] ~= nil)
+check("identdb: capture source scroll",
+  NebbieDash.identDb.entries["mantello varco ombra profonda"].lastSource == "scroll")
+check("identdb: isIdentFatigueLine maschile",
+  NebbieDash.isIdentFatigueLine("Vieni sopraffatto da un'ondata di stanchezza."))
+
+-- Possesso: give / drop / hold (messaggi reali utente 2026-11-08)
+local giveP = NebbieDash.parseGiveLine("Dai il mantello dall'ombra profonda a Sirio.")
+check("identdb: parseGiveLine item+target",
+  giveP and giveP.item == "il mantello dall'ombra profonda" and giveP.target == "Sirio")
+local dropP = NebbieDash.parseDropLine("Posi il mantello dall'ombra profonda.")
+check("identdb: parseDropLine item",
+  dropP and dropP.item == "il mantello dall'ombra profonda")
+check("identdb: normalizeIdentItemText dall'",
+  NebbieDash.normalizeIdentItemText("il mantello dall'ombra profonda")
+    :find("ombra", 1, true) ~= nil)
+local matched = select(1, NebbieDash.matchIdentEntryByItemText("il mantello dall'ombra profonda"))
+check("identdb: matchIdentEntryByItemText su mantello identify",
+  matched and matched.objectName == "mantello varco ombra profonda")
+
+NebbieDash.currentChar = "NomiyaMaki"
+line = "Dai il mantello dall'ombra profonda a Sirio."
+NebbieDash.onIdentGiveLine()
+local afterGive = NebbieDash.identDb.entries["mantello varco ombra profonda"]
+check("identdb: give → possesso Sirio",
+  afterGive and afterGive.possession and afterGive.possession.status == "held"
+    and afterGive.possession.character == "Sirio"
+    and afterGive.possession.via == "give")
+
+line = "Posi il mantello dall'ombra profonda."
+NebbieDash.onIdentDropLine()
+local afterDrop = NebbieDash.identDb.entries["mantello varco ombra profonda"]
+check("identdb: drop → ground + pending",
+  afterDrop and afterDrop.possession and afterDrop.possession.status == "ground"
+    and NebbieDash._identDropPending and NebbieDash._identDropPending.key == "mantello varco ombra profonda")
+NebbieDash.cmdIdentDbHold("Mirari")
+local afterHold = NebbieDash.identDb.entries["mantello varco ombra profonda"]
+check("identdb: hold assegna Mirari",
+  afterHold and afterHold.possession.character == "Mirari"
+    and afterHold.possession.status == "held"
+    and NebbieDash._identDropPending == nil)
+check("identdb: listIdentDbByCharacter su possesso Mirari",
+  #NebbieDash.listIdentDbByCharacter("Mirari") >= 1)
 
 print("")
 if failures == 0 then

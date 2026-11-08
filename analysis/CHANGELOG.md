@@ -1,5 +1,16 @@
 # CHANGELOG — nebbie-complete-dashboard-package
 
+## 1.15.51 — 2026-11-08
+
+- **Archivio identify condiviso**: ogni identify (spell o pergamena) viene salvato in tempo
+  reale in `profiles/ndashboard/nebbie-ident-db.lua` (comune a tutti i profili).
+- Cattura leggera: trigger di start su `La conoscenza ti pervade:`; catch-all attivo solo
+  durante il blocco; salvataggio deferred (0.2s) per non lagare.
+- **Possesso**: `Dai il … a X.` trasferisce l’oggetto; `Posi il ….` → “lasciato in terra”
+  e richiesta `nidentdb hold <NomePg>` (o `nidentdb hold <oggetto> <NomePg>`).
+- Comandi: `nidentdb [query]`, `nidentdb where <query>`, `nidentdb char <nome>`,
+  `nidentdb hold …`, `nidentdbreload`.
+
 ## 1.15.50 — 2026-11-06
 
 - **Disarmo (armi trattenute da rune)**: su messaggio `... ti sfugge dalle mani, ma le rune ...`

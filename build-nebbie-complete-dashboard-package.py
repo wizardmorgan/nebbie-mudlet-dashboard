@@ -110,6 +110,9 @@ profilo Mudlet, più personaggi, cambio automatico rilevato dal prompt).
   `C:/Users/<tu>/.config/mudlet/profiles/ndashboard`). Indice:
   **`profiles/nebbie-dash-config-root.txt`**. Comando **`nconfigdir`**; scheletri
   creati al primo avvio; migrazione da profilo singolo o da `~/NebbieDash`.
+- **Archivio identify** (`nidentdb`): salva in tempo reale ogni identify
+  (spell/pergamena) in `nebbie-ident-db.lua` condiviso; cerca per nome e
+  incrocia con l’equip in cache (`nidentdb where`).
 - **Corretto (bug al primo avvio dopo installazione pulita)**: poteva
   comparire l'errore `attempt to index global 'NebbieDash' (a nil value)`
   perché lo script agganciato a `sysLoadEvent` poteva eseguirsi prima dello
@@ -198,6 +201,9 @@ ALIASES = [
     ("nebbie-dash-ident-batch", "^nidentbatch$", "NebbieDash.cmdIdentBatch()"),
     ("nebbie-dash-ident-batch-filter", "^nidentbatch (.+)$", "NebbieDash.cmdIdentBatch(matches[2])"),
     ("nebbie-dash-ident-batch-reload", "^nidentbatchreload$", "NebbieDash.cmdReloadIdentBatch()"),
+    ("nebbie-dash-ident-db", "^nidentdb$", "NebbieDash.cmdIdentDb(\"\")"),
+    ("nebbie-dash-ident-db-args", "^nidentdb (.+)$", "NebbieDash.cmdIdentDb(matches[2])"),
+    ("nebbie-dash-ident-db-reload", "^nidentdbreload$", "NebbieDash.cmdReloadIdentDb()"),
 ]
 
 
