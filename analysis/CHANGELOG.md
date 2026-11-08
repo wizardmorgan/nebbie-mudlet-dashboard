@@ -1,5 +1,11 @@
 # CHANGELOG — nebbie-complete-dashboard-package
 
+## 1.15.63 — 2026-11-08
+
+- **Finestra floating chat** (`nchat`): raccoglie say, gt/gtell, tell, whisper,
+  ask, gossip, shout (formati `act.comm.cpp`). Preferenza `chat_window` in
+  `nebbie-dash-preferences.txt`.
+
 ## 1.15.62 — 2026-11-08
 
 - **Ident possesso (cedibile)**: give/drop aggiornano il DB solo se l’oggetto è

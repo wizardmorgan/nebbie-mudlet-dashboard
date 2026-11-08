@@ -1597,6 +1597,34 @@ check("knowdb: look stanza appende tag HR/L",
   table.concat(_G.__hlEchoLog):find("HR>+4", 1, true) ~= nil
     and table.concat(_G.__hlEchoLog):find("L50", 1, true) ~= nil)
 
+-- Chat window parser (formati act.comm.cpp)
+local function chatOk(label, text, channel, speaker, message, target)
+  local p = NebbieDash.parseChatLine(text)
+  local ok = p and p.channel == channel and p.speaker == speaker and p.message == message
+  if target then ok = ok and p.target == target end
+  check(label, ok)
+end
+chatOk("chat: say self", "Tu dici 'ciao a tutti'", "say", "Tu", "ciao a tutti")
+chatOk("chat: say other", "[Mirari] dice 'pronti'", "say", "Mirari", "pronti")
+chatOk("chat: gtell self", "Tu dici al gruppo 'tankate'", "gtell", "Tu", "tankate")
+chatOk("chat: gtell other", "[Sirio] dice al gruppo 'ok'", "gtell", "Sirio", "ok")
+chatOk("chat: gossip other", "[Hayato] vi dice 'zone libera'", "gossip", "Hayato", "zone libera")
+chatOk("chat: tell self", "Tu dici a Mirari 'qui'", "tell", "Tu", "qui", "Mirari")
+chatOk("chat: tell AFK", "Tu dici a Bob (che e' AFK) 'ping'", "tell", "Tu", "ping", "Bob")
+chatOk("chat: tell other", "[NomiyaMaki] ti dice 'arrivo'", "tell", "NomiyaMaki", "arrivo")
+chatOk("chat: whisper self", "Tu sussurri a Sirio, 'psst'", "whisper", "Tu", "psst", "Sirio")
+chatOk("chat: whisper other", "[Sirio] ti sussurra 'ok'", "whisper", "Sirio", "ok")
+chatOk("chat: ask self", "Tu chiedi a Goblin, 'chi sei'", "ask", "Tu", "chi sei", "Goblin")
+chatOk("chat: ask other", "[Mirari] ti chiede 'dove'", "ask", "Mirari", "dove")
+chatOk("chat: shout self", "Tu gridi 'aiuto'", "shout", "Tu", "aiuto")
+chatOk("chat: shout other", "[Orco] grida 'RAAH'", "shout", "Orco", "RAAH")
+check("chat: ignora riga non chat", NebbieDash.parseChatLine("Stai usando:") == nil)
+check("chat: gtell non confuso con say",
+  NebbieDash.parseChatLine("Tu dici al gruppo 'x'").channel == "gtell")
+local echoTell = NebbieDash.formatChatEcho(NebbieDash.parseChatLine("Tu dici a Mirari 'ciao'"))
+check("chat: format echo tell ha freccia",
+  echoTell and echoTell:find("Tu → Mirari", 1, true) ~= nil)
+
 print("")
 if failures == 0 then
   print("TUTTI I TEST OK (" .. #eqLines .. " righe eq, " .. #attribLines .. " righe attrib)")

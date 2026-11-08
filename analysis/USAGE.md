@@ -168,6 +168,30 @@ nknowdbreload
 I campi non rivelati dal cast corrente restano quelli di cast precedenti (merge).
 Colori / testo aggiuntivo in output stile dadomud: in seguito, con criteri dedicati.
 
+## Finestra chat (`nchat`)
+
+Dalla **1.15.63** una finestra floating raccoglie i canali di comunicazione:
+
+| Canale | Comandi di gioco |
+|--------|------------------|
+| say | `say` / `'` |
+| gtell | `gt` / `gtell` |
+| tell | `tell` |
+| whisper | `whisper` |
+| ask | `ask` |
+| gossip | `gossip` |
+| shout | `shout` |
+
+```
+nchat          # mostra / nasconde
+nchat on|off   # attiva (preferenza) o spegne trigger+finestra
+nchat clear    # svuota il log
+```
+
+Preferenza `chat_window = on|off` in `nebbie-dash-preferences.txt`. Trascinabile/ridimensionabile
+(Mudlet Adjustable.Container). Nota: l’echo parlante di `gossip` è uguale a `say` (`Tu dici '…'`),
+quindi in uscita compare come `[say]`; i gossip altrui (`vi dice`) sono etichettati correttamente.
+
 ## Cambio arma (`usa`)
 
 Dalla **1.15.31** non c'è più il pannello "Armi" sotto l'Equip: la colonna sinistra mostra solo

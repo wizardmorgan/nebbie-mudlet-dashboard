@@ -212,6 +212,8 @@ ALIASES = [
     ("nebbie-dash-know-db", "^nknowdb$", "NebbieDash.cmdKnowDb(\"\")"),
     ("nebbie-dash-know-db-args", "^nknowdb (.+)$", "NebbieDash.cmdKnowDb(matches[2])"),
     ("nebbie-dash-know-db-reload", "^nknowdbreload$", "NebbieDash.cmdReloadKnowDb()"),
+    ("nebbie-dash-chat", "^nchat$", "NebbieDash.cmdChat(\"\")"),
+    ("nebbie-dash-chat-args", "^nchat (.+)$", "NebbieDash.cmdChat(matches[2])"),
     ("nebbie-dash-package-update", "^npackageupdate(?: (force|forza))?$",
      "NebbieDash.cmdPackageUpdate(matches[2])"),
 ]

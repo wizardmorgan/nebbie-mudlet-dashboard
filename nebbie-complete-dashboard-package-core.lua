@@ -9,7 +9,7 @@
 -- docs/mudlet/analysis/RECOMMENDATION.md. Pattern prompt/eq basati su dati reali
 -- forniti dall'utente (docs/mudlet/analysis/Q&A.md, Round 3).
 
-local PKG_VER = "1.15.62"
+local PKG_VER = "1.15.63"
 local PKG_REPO = "wizardmorgan/nebbie-mudlet-dashboard"
 local PKG_FILE = "nebbie-complete-dashboard-package.mpackage"
 -- @main su jsDelivr puo' restare stale (osservato: restava 1.15.56 mentre tip
@@ -525,10 +525,12 @@ function NebbieDash.ensurePreferencesFile()
     "# weapon_swap_delay = 0.5 # secondi tra i comandi di usa / cambio arma\n" ..
     "# sanity_neq_on_login = on  # se l'equip in cache è vuoto ma marcato sincronizzato, invia eq\n" ..
     "# text_highlights = on      # gemme/metalli + evidenziazioni aura/disarm/dig/sanc\n" ..
+    "# chat_window = on          # finestra floating per say/gt/tell/whisper/ask/gossip/shout\n" ..
     "sidebar_mode = dock\n" ..
     "weapon_swap_delay = 0.5\n" ..
     "sanity_neq_on_login = on\n" ..
-    "text_highlights = on\n"
+    "text_highlights = on\n" ..
+    "chat_window = on\n"
   )
   f:close()
 end
@@ -545,6 +547,7 @@ function NebbieDash.loadPreferences()
     weapon_swap_delay = 0.5,
     sanity_neq_on_login = true,
     text_highlights = true,
+    chat_window = true,
   }
   local path = NebbieDash.preferencesPath()
   if type(io.exists) == "function" and io.exists(path) then
@@ -563,6 +566,8 @@ function NebbieDash.loadPreferences()
             NebbieDash.prefs.sanity_neq_on_login = NebbieDash.parsePreferencesBool(val)
           elseif key == "text_highlights" then
             NebbieDash.prefs.text_highlights = NebbieDash.parsePreferencesBool(val)
+          elseif key == "chat_window" then
+            NebbieDash.prefs.chat_window = NebbieDash.parsePreferencesBool(val)
           end
         end
       end
@@ -572,6 +577,7 @@ function NebbieDash.loadPreferences()
   NebbieDash.sidebarMode = NebbieDash.prefs.sidebar_mode
   NebbieDash.weaponSwapDelay = NebbieDash.prefs.weapon_swap_delay or NebbieDash.weaponSwapDelay
   NebbieDash.textHighlights = NebbieDash.prefs.text_highlights ~= false
+  NebbieDash.chatEnabled = NebbieDash.prefs.chat_window ~= false
 end
 
 function NebbieDash.savePreferencesFile()
@@ -584,7 +590,8 @@ function NebbieDash.savePreferencesFile()
     "sidebar_mode = " .. tostring(NebbieDash.sidebarMode or NebbieDash.prefs.sidebar_mode or "float") .. "\n" ..
     "weapon_swap_delay = " .. tostring(NebbieDash.weaponSwapDelay or 0.5) .. "\n" ..
     "sanity_neq_on_login = " .. ((NebbieDash.prefs and NebbieDash.prefs.sanity_neq_on_login) and "on" or "off") .. "\n" ..
-    "text_highlights = " .. ((NebbieDash.prefs and NebbieDash.prefs.text_highlights ~= false) and "on" or "off") .. "\n"
+    "text_highlights = " .. ((NebbieDash.prefs and NebbieDash.prefs.text_highlights ~= false) and "on" or "off") .. "\n" ..
+    "chat_window = " .. ((NebbieDash.chatEnabled ~= false) and "on" or "off") .. "\n"
   )
   f:close()
 end
@@ -1198,6 +1205,7 @@ NebbieDash.SHORTCUT_RESERVED = {
   nidentdb = true, nidentdbreload = true,
   nknowdb = true, nknowdbreload = true,
   npackageupdate = true,
+  nchat = true,
   usa = true,
   nconfigdir = true,
   nsidebar = true,
@@ -2154,8 +2162,333 @@ function NebbieDash.teardownGui()
   NebbieDash._floatSidebarCreated = false
   NebbieDash._equipRatioDragReady = false
   NebbieDash._equipRatioDrag = nil
+  NebbieDash.destroyChatWindow()
   pcall(setBorderLeft, 0)
   pcall(setBorderRight, 0)
+end
+
+-- ---------------------------------------------------------------------------
+-- Finestra floating chat: raccoglie say / gtell / tell / whisper / ask /
+-- gossip / shout (formati reali da act.comm.cpp). Indipendente dal sidebar.
+-- ---------------------------------------------------------------------------
+NebbieDash.chatEnabled = true
+NebbieDash._chatTrigs = NebbieDash._chatTrigs or {}
+NebbieDash.CHAT_CHANNEL_COLORS = {
+  say = "white",
+  gossip = "yellow",
+  gtell = "cyan",
+  tell = "magenta",
+  whisper = "green",
+  ask = "blue",
+  shout = "red",
+}
+
+function NebbieDash.canUseChatWindow()
+  return type(Adjustable) == "table" and type(Adjustable.Container) == "table"
+    and type(Geyser) == "table" and type(Geyser.MiniConsole) == "table"
+end
+
+function NebbieDash.destroyChatWindow()
+  if NebbieDash._chatContainer then
+    if type(NebbieDash._chatContainer.hide) == "function" then
+      pcall(function() NebbieDash._chatContainer:hide() end)
+    end
+    if type(NebbieDash._chatContainer.delete) == "function" then
+      pcall(function() NebbieDash._chatContainer:delete() end)
+    end
+  end
+  for _, name in ipairs({ "NebbieDashChatContainer", "NebbieDashChat" }) do
+    if type(deleteWindow) == "function" then pcall(deleteWindow, name) end
+  end
+  NebbieDash._chatContainer = nil
+  NebbieDash._chatGeyser = nil
+  NebbieDash._chatCreated = false
+  NebbieDash._chatHidden = false
+end
+
+function NebbieDash.chatConsoleCecho(text)
+  local g = NebbieDash._chatGeyser
+  if g and type(g.cecho) == "function" then
+    g:cecho(text)
+  elseif type(cecho) == "function" then
+    cecho("NebbieDashChat", text)
+  end
+end
+
+function NebbieDash.clearChatWindow()
+  if NebbieDash._chatGeyser and type(NebbieDash._chatGeyser.clear) == "function" then
+    pcall(function() NebbieDash._chatGeyser:clear() end)
+  elseif type(clearWindow) == "function" then
+    pcall(clearWindow, "NebbieDashChat")
+  end
+end
+
+function NebbieDash.showChatWindow()
+  if NebbieDash._chatContainer and type(NebbieDash._chatContainer.show) == "function" then
+    pcall(function() NebbieDash._chatContainer:show() end)
+  elseif type(showWindow) == "function" then
+    pcall(showWindow, "NebbieDashChatContainer")
+    pcall(showWindow, "NebbieDashChat")
+  end
+  NebbieDash._chatHidden = false
+end
+
+function NebbieDash.hideChatWindow()
+  if NebbieDash._chatContainer and type(NebbieDash._chatContainer.hide) == "function" then
+    pcall(function() NebbieDash._chatContainer:hide() end)
+  elseif type(hideWindow) == "function" then
+    pcall(hideWindow, "NebbieDashChatContainer")
+    pcall(hideWindow, "NebbieDashChat")
+  end
+  NebbieDash._chatHidden = true
+end
+
+function NebbieDash.initChatWindow()
+  if NebbieDash.chatEnabled == false then return end
+  if not NebbieDash.canUseChatWindow() then
+    cecho("<orange>[NebbieDash] Finestra chat non disponibile (serve Adjustable.Container / Geyser).\n")
+    return
+  end
+  if NebbieDash._chatCreated and NebbieDash._chatContainer then
+    NebbieDash.showChatWindow()
+    return
+  end
+  NebbieDash.destroyChatWindow()
+  local w, h = 440, 300
+  NebbieDash._chatContainer = Adjustable.Container:new({
+    name = "NebbieDashChatContainer",
+    x = "-460",
+    y = 40,
+    width = w,
+    height = h,
+    titleText = "Nebbie — Chat",
+    titleTxtColor = "white",
+    adjLabelstyle = [[
+      background-color: rgb(12, 12, 18);
+      border: 2px solid rgb(70, 110, 70);
+      border-radius: 6px;
+    ]],
+  })
+  local pad = 4
+  local titleH = 22
+  NebbieDash._chatGeyser = Geyser.MiniConsole:new({
+    name = "NebbieDashChat",
+    x = pad,
+    y = titleH,
+    width = "100%-" .. tostring(pad * 2),
+    height = "100%-" .. tostring(titleH + pad),
+  }, NebbieDash._chatContainer)
+  NebbieDash._chatGeyser:setColor(12, 12, 16, 255)
+  if type(setMiniConsoleFontSize) == "function" then
+    setMiniConsoleFontSize("NebbieDashChat", NebbieDash.fontSize or 10)
+  end
+  if type(enableScrollBar) == "function" then
+    enableScrollBar("NebbieDashChat", true)
+  end
+  if type(setMaxLines) == "function" then
+    setMaxLines("NebbieDashChat", 2000)
+  end
+  if type(NebbieDash._chatContainer.load) == "function" then
+    pcall(function() NebbieDash._chatContainer:load() end)
+  end
+  NebbieDash._chatCreated = true
+  NebbieDash._chatHidden = false
+  NebbieDash.chatConsoleCecho(
+    "<grey>Canali: say · gt · tell · whisper · ask · gossip · shout\n"
+      .. "Comandi: <yellow>nchat<grey> (toggle) · <yellow>nchat clear<grey> · <yellow>nchat off\n")
+end
+
+-- Parser canali chat (testo già senza colori Mudlet). Ordine: casi più specifici prima.
+function NebbieDash.parseChatLine(text)
+  text = NebbieDash.stripColors(text or ""):match("^%s*(.-)%s*$") or ""
+  if text == "" then return nil end
+
+  local msg = text:match("^Tu dici al gruppo '(.+)'%s*$")
+  if msg then
+    return { channel = "gtell", speaker = "Tu", message = msg, self = true }
+  end
+
+  local target
+  target, msg = text:match("^Tu dici a (.+) %(che e' AFK%) '(.+)'%s*$")
+  if target and msg then
+    return { channel = "tell", speaker = "Tu", target = target, message = msg, self = true, afk = true }
+  end
+  target, msg = text:match("^Tu dici a (.+) '(.+)'%s*$")
+  if target and msg then
+    return { channel = "tell", speaker = "Tu", target = target, message = msg, self = true }
+  end
+
+  target, msg = text:match("^Tu sussurri a (.+), '(.+)'%s*$")
+  if target and msg then
+    return { channel = "whisper", speaker = "Tu", target = target, message = msg, self = true }
+  end
+
+  target, msg = text:match("^Tu chiedi a (.+), '(.+)'%s*$")
+  if target and msg then
+    return { channel = "ask", speaker = "Tu", target = target, message = msg, self = true }
+  end
+
+  msg = text:match("^Tu gridi '(.+)'%s*$")
+  if msg then
+    return { channel = "shout", speaker = "Tu", message = msg, self = true }
+  end
+
+  -- Gossip e say: stesso echo parlante "Tu dici '…'" (gossip giallo in gioco).
+  msg = text:match("^Tu dici '(.+)'%s*$")
+  if msg then
+    return { channel = "say", speaker = "Tu", message = msg, self = true, ambiguousGossip = true }
+  end
+
+  local who
+  who, msg = text:match("^%[(.-)%] dice al gruppo '(.+)'%s*$")
+  if who and msg then
+    return { channel = "gtell", speaker = who, message = msg }
+  end
+  who, msg = text:match("^%[(.-)%] vi dice '(.+)'%s*$")
+  if who and msg then
+    return { channel = "gossip", speaker = who, message = msg }
+  end
+  who, msg = text:match("^%[(.-)%] ti dice '(.+)'%s*$")
+  if who and msg then
+    return { channel = "tell", speaker = who, message = msg }
+  end
+  who, msg = text:match("^%[(.-)%] ti sussurra '(.+)'%s*$")
+  if who and msg then
+    return { channel = "whisper", speaker = who, message = msg }
+  end
+  who, msg = text:match("^%[(.-)%] ti chiede '(.+)'%s*$")
+  if who and msg then
+    return { channel = "ask", speaker = who, message = msg }
+  end
+  who, msg = text:match("^%[(.-)%] grida '(.+)'%s*$")
+  if who and msg then
+    return { channel = "shout", speaker = who, message = msg }
+  end
+  who, msg = text:match("^%[(.-)%] dice '(.+)'%s*$")
+  if who and msg then
+    return { channel = "say", speaker = who, message = msg }
+  end
+  return nil
+end
+
+function NebbieDash.formatChatEcho(parsed)
+  if not parsed then return nil end
+  local color = NebbieDash.CHAT_CHANNEL_COLORS[parsed.channel] or "white"
+  local who = parsed.speaker or "?"
+  if parsed.self and parsed.target and parsed.target ~= "" then
+    who = "Tu → " .. parsed.target
+  end
+  local chan = parsed.channel or "?"
+  if parsed.ambiguousGossip then
+    chan = "say"
+  end
+  return string.format("<%s>[%s]<white> %s: %s\n", color, chan, who, parsed.message or "")
+end
+
+function NebbieDash.appendChatParsed(parsed)
+  if not parsed or NebbieDash.chatEnabled == false then return end
+  if not NebbieDash._chatCreated then
+    NebbieDash.initChatWindow()
+  end
+  if NebbieDash._chatHidden then return end
+  local echo = NebbieDash.formatChatEcho(parsed)
+  if echo then NebbieDash.chatConsoleCecho(echo) end
+end
+
+function NebbieDash.onChatCaptureLine()
+  if NebbieDash.chatEnabled == false then return end
+  local text = line or (type(getCurrentLine) == "function" and getCurrentLine()) or ""
+  local parsed = NebbieDash.parseChatLine(text)
+  if parsed then NebbieDash.appendChatParsed(parsed) end
+end
+
+function NebbieDash.teardownChatTriggers()
+  for _, id in ipairs(NebbieDash._chatTrigs or {}) do
+    if id then pcall(function() killTrigger(id) end) end
+  end
+  NebbieDash._chatTrigs = {}
+end
+
+function NebbieDash.installChatTriggers()
+  NebbieDash.teardownChatTriggers()
+  if NebbieDash.chatEnabled == false then return end
+  if type(tempTrigger) ~= "function" then return end
+  local patterns = {
+    "Tu dici al gruppo '",
+    "Tu dici a ",
+    "Tu sussurri a ",
+    "Tu chiedi a ",
+    "Tu gridi '",
+    "Tu dici '",
+    "] dice al gruppo '",
+    "] vi dice '",
+    "] ti dice '",
+    "] ti sussurra '",
+    "] ti chiede '",
+    "] grida '",
+    "] dice '",
+  }
+  for _, pat in ipairs(patterns) do
+    local id = tempTrigger(pat, [[NebbieDash.onChatCaptureLine()]])
+    table.insert(NebbieDash._chatTrigs, id)
+  end
+end
+
+function NebbieDash.cmdChat(argStr)
+  argStr = (argStr or ""):match("^%s*(.-)%s*$") or ""
+  local mode = argStr:lower()
+  if mode == "" or mode == "toggle" then
+    if not NebbieDash._chatCreated then
+      NebbieDash.chatEnabled = true
+      NebbieDash.prefs = NebbieDash.prefs or {}
+      NebbieDash.prefs.chat_window = true
+      NebbieDash.savePreferencesFile()
+      NebbieDash.initChatWindow()
+      NebbieDash.installChatTriggers()
+      cecho("<green>[NebbieDash] Finestra chat aperta (<yellow>nchat clear<green> / <yellow>nchat off<green>).\n")
+      return
+    end
+    if NebbieDash._chatHidden then
+      NebbieDash.showChatWindow()
+      cecho("<green>[NebbieDash] Finestra chat mostrata.\n")
+    else
+      NebbieDash.hideChatWindow()
+      cecho("<grey>[NebbieDash] Finestra chat nascosta (<yellow>nchat<grey> per riaprire).\n")
+    end
+    return
+  end
+  if mode == "on" or mode == "show" then
+    NebbieDash.chatEnabled = true
+    NebbieDash.prefs = NebbieDash.prefs or {}
+    NebbieDash.prefs.chat_window = true
+    NebbieDash.savePreferencesFile()
+    NebbieDash.initChatWindow()
+    NebbieDash.installChatTriggers()
+    NebbieDash.showChatWindow()
+    cecho("<green>[NebbieDash] Chat window on.\n")
+    return
+  end
+  if mode == "off" or mode == "hide" then
+    NebbieDash.hideChatWindow()
+    if mode == "off" then
+      NebbieDash.chatEnabled = false
+      NebbieDash.prefs = NebbieDash.prefs or {}
+      NebbieDash.prefs.chat_window = false
+      NebbieDash.savePreferencesFile()
+      NebbieDash.teardownChatTriggers()
+      cecho("<grey>[NebbieDash] Chat window off (preferenza salvata).\n")
+    else
+      cecho("<grey>[NebbieDash] Chat window nascosta.\n")
+    end
+    return
+  end
+  if mode == "clear" or mode == "cls" then
+    NebbieDash.clearChatWindow()
+    cecho("<green>[NebbieDash] Chat window svuotata.\n")
+    return
+  end
+  cecho("<orange>[NebbieDash] Uso: <yellow>nchat<orange> | <yellow>nchat on|off|clear\n")
+  cecho("<grey>Raccoglie: say, gt/gtell, tell, whisper, ask, gossip, shout.\n")
 end
 
 function NebbieDash.equipDividerPointerY(event)
@@ -2515,6 +2848,8 @@ NebbieDash.HELP_TEXT = {
   { "nknowdb [query]", "Cerca nell'archivio know monster condiviso (profiles/ndashboard)." },
   { "nknowdb race <razza>", "Elenca mostri per razza (es. nknowdb race Goblinoid)." },
   { "nknowdbreload", "Ricarica nebbie-know-db.lua dalla cartella condivisa." },
+  { "nchat", "Mostra/nascondi la finestra floating chat (say/gt/tell/whisper/ask/gossip/shout)." },
+  { "nchat on|off|clear", "Attiva/disattiva o svuota la finestra chat." },
   { "identify <arma>", "(comando di gioco) Rileva il tipo di danno (slash/blunt/pierce) per usa/disarmo." },
   { "nhelp", "Mostra/nascondi questa finestra." },
 }
@@ -2683,11 +3018,20 @@ function NebbieDash.cmdReloadPreferences()
   NebbieDash.loadPreferences()
   NebbieDash.loadSoundsConfig()
   NebbieDash.weaponSwapDelay = NebbieDash.prefs.weapon_swap_delay or NebbieDash.weaponSwapDelay
+  NebbieDash.chatEnabled = NebbieDash.prefs.chat_window ~= false
   NebbieDash.installTextHighlightTriggers()
+  if NebbieDash.chatEnabled then
+    NebbieDash.initChatWindow()
+    NebbieDash.installChatTriggers()
+  else
+    NebbieDash.teardownChatTriggers()
+    NebbieDash.hideChatWindow()
+  end
   cecho("<green>[NebbieDash] Preferenze ricaricate da <white>" .. NebbieDash.preferencesPath() ..
     "<green> (sidebar=" .. tostring(NebbieDash.effectiveSidebarMode()) ..
     ", weapon_swap_delay=" .. tostring(NebbieDash.weaponSwapDelay) ..
-    ", text_highlights=" .. ((NebbieDash.textHighlights ~= false) and "on" or "off") .. ").\n")
+    ", text_highlights=" .. ((NebbieDash.textHighlights ~= false) and "on" or "off") ..
+    ", chat_window=" .. ((NebbieDash.chatEnabled ~= false) and "on" or "off") .. ").\n")
 end
 
 function NebbieDash.cmdSetSidebar(modeStr)
@@ -7389,6 +7733,7 @@ function NebbieDash.teardownTriggers()
     if id then pcall(function() killTrigger(id) end) end
   end
   NebbieDash._spellExpiryTrigs = {}
+  NebbieDash.teardownChatTriggers()
   NebbieDash.teardownTextHighlightTriggers()
   NebbieDash.teardownSpellShortcutTriggers()
 end
@@ -7471,6 +7816,7 @@ function NebbieDash.installTriggers()
     table.insert(NebbieDash._spellExpiryTrigs, id)
   end
   NebbieDash.installTextHighlightTriggers()
+  NebbieDash.installChatTriggers()
   if NebbieDash._groupSoloTrig then pcall(disableTrigger, NebbieDash._groupSoloTrig) end
   if NebbieDash._groupHeaderTrig then pcall(disableTrigger, NebbieDash._groupHeaderTrig) end
   -- Gli anonymous event handler restano registrati una volta sola (a
@@ -7565,6 +7911,9 @@ function NebbieDash.boot()
   NebbieDash.destroyLegacyGuiWindows()
   NebbieDash.initGUI()
   NebbieDash.initHelpButton()
+  if NebbieDash.chatEnabled ~= false then
+    NebbieDash.initChatWindow()
+  end
   NebbieDash._mainLoaded = true
   NebbieDash.ensurePackageDownloadHandlers()
   NebbieDash.ensurePackageUpdateEventHandler()
