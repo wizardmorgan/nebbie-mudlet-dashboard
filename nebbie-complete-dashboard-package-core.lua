@@ -3668,15 +3668,15 @@ function NebbieDash.endWeaponSwapGuard(gen, restoreIfEmpty)
   NebbieDash.patchCachedEqLocation(data, "sulla schiena", stash)
 end
 
-function NebbieDash.shouldPreserveBackSlot(itemName)
+function NebbieDash.shouldPreserveBackSlot(_itemName)
   if NebbieDash._hungerMacroBusy or NebbieDash._weaponSwapBusy then
     return true
   end
+  -- Finche' resta lo stash del cambio arma, NON svuotare la schiena su rem:
+  -- anche se il nome $p non matcha perfettamente la cache (eqItemNamesMatch).
   local stash = NebbieDash._weaponSwapBackItem
-  if stash and stash ~= "" and itemName and itemName ~= "" then
-    if NebbieDash.eqItemNamesMatch(stash, itemName) then
-      return true
-    end
+  if stash and stash ~= "" then
+    return true
   end
   return false
 end
