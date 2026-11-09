@@ -9,7 +9,7 @@
 -- docs/mudlet/analysis/RECOMMENDATION.md. Pattern prompt/eq basati su dati reali
 -- forniti dall'utente (docs/mudlet/analysis/Q&A.md, Round 3).
 
-local PKG_VER = "1.15.66"
+local PKG_VER = "1.15.67"
 local PKG_REPO = "wizardmorgan/nebbie-mudlet-dashboard"
 local PKG_FILE = "nebbie-complete-dashboard-package.mpackage"
 -- @main su jsDelivr puo' restare stale (osservato: restava 1.15.56 mentre tip
@@ -2739,9 +2739,10 @@ function NebbieDash.identUiToolbar()
   end
   NebbieDash.identUiCechoLink("<grey>[reset filtri]", "NebbieDash.identUiResetFilters()", "Azzera filtri")
   NebbieDash.identUiCecho("\n")
+  -- Niente <...> letterali in cecho (sono tag colore); usiamo [arg].
   NebbieDash.identUiCecho(
-    "<grey>Comandi: <yellow>nidentui filter &lt;testo&gt;<grey> · <yellow>nidentui char &lt;Pg&gt;<grey> · "
-      .. "<yellow>nidentui del &lt;ogg&gt;\n")
+    "<grey>Comandi: <yellow>nidentui filter [testo]<grey> · <yellow>nidentui char [Pg]<grey> · "
+      .. "<yellow>nidentui del [ogg]\n")
   NebbieDash.identUiCecho("<grey>─────────────────────────────────────\n")
 end
 
@@ -3069,9 +3070,9 @@ function NebbieDash.cmdIdentUi(argStr)
   if mode == "help" or mode == "?" then
     cecho("<green>[NebbieDash] nidentui — gestore floating archivio identify\n")
     cecho("<grey>  <yellow>nidentui<grey>              apri / mostra finestra\n")
-    cecho("<grey>  <yellow>nidentui filter &lt;testo&gt;<grey>  filtra nome/flags/affects\n")
-    cecho("<grey>  <yellow>nidentui char &lt;Pg&gt;<grey>     filtra per personaggio\n")
-    cecho("<grey>  <yellow>nidentui del &lt;oggetto&gt;<grey>  elimina (se univoco)\n")
+    cecho("<grey>  <yellow>nidentui filter [testo]<grey>  filtra nome/flags/affects\n")
+    cecho("<grey>  <yellow>nidentui char [Pg]<grey>     filtra per personaggio\n")
+    cecho("<grey>  <yellow>nidentui del [oggetto]<grey>  elimina (se univoco)\n")
     cecho("<grey>  <yellow>nidentui reset<grey>         azzera filtri\n")
     cecho("<grey>  <yellow>nidentui off<grey>            nascondi finestra\n")
     cecho("<grey>In finestra: click nome=dettaglio, [x]=elimina, [ced]=cedibile, sort/pagine.\n")

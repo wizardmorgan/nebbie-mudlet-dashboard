@@ -1,5 +1,10 @@
 # CHANGELOG — nebbie-complete-dashboard-package
 
+## 1.15.67 — 2026-11-09
+
+- **nidentui**: testo guida senza `&lt;…&gt;` (cecho li mostrava letterali);
+  argomenti indicati come `[testo]` / `[Pg]`.
+
 ## 1.15.66 — 2026-11-09
 
 - **nidentui**: finestra floating per gestire l’archivio identify — lista
