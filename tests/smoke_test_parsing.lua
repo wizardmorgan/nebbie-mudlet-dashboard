@@ -1418,6 +1418,25 @@ check("identdb: give su non-cedibile non aggiorna",
 NebbieDash.cmdIdentDbSetCedibile("mantello varco ombra profonda", true)
 check("identdb: cedibile manuale riattivato", afterHold.cedibile == true)
 
+-- UI gestore: delete + filtri
+local delKey = "anello varco chiave senza porta"
+check("identui: entry anello presente prima del delete",
+  NebbieDash.getIdentEntryByKey(delKey) ~= nil)
+local delOk = NebbieDash.deleteIdentEntry(delKey)
+check("identui: deleteIdentEntry ok", delOk == true)
+check("identui: entry assente dopo delete", NebbieDash.getIdentEntryByKey(delKey) == nil)
+check("identui: delete inesistente fallisce", NebbieDash.deleteIdentEntry(delKey) == false)
+NebbieDash._identUiState.filter = "mantello"
+NebbieDash._identUiState.charFilter = ""
+NebbieDash._identUiState.onlyCedibile = true
+NebbieDash._identUiState.sort = "name"
+local uiRows = NebbieDash.collectIdentUiEntries()
+check("identui: collect filtra cedibili+mantello",
+  #uiRows >= 1 and uiRows[1].objectName:find("mantello", 1, true) ~= nil)
+NebbieDash.identUiResetFilters()
+check("identui: reset filtri",
+  NebbieDash._identUiState.filter == "" and NebbieDash._identUiState.onlyCedibile == false)
+
 -- Stesso nome, affects diverse → entry #2; stesso nome+stats → upsert
 local countBeforeAlt = NebbieDash.identDbEntryCount()
 local mantelloAlt = NebbieDash.parseIdentifyFull({

@@ -209,6 +209,8 @@ ALIASES = [
     ("nebbie-dash-ident-db", "^nidentdb$", "NebbieDash.cmdIdentDb(\"\")"),
     ("nebbie-dash-ident-db-args", "^nidentdb (.+)$", "NebbieDash.cmdIdentDb(matches[2])"),
     ("nebbie-dash-ident-db-reload", "^nidentdbreload$", "NebbieDash.cmdReloadIdentDb()"),
+    ("nebbie-dash-ident-ui", "^nidentui$", "NebbieDash.cmdIdentUi(\"\")"),
+    ("nebbie-dash-ident-ui-args", "^nidentui (.+)$", "NebbieDash.cmdIdentUi(matches[2])"),
     ("nebbie-dash-know-db", "^nknowdb$", "NebbieDash.cmdKnowDb(\"\")"),
     ("nebbie-dash-know-db-args", "^nknowdb (.+)$", "NebbieDash.cmdKnowDb(matches[2])"),
     ("nebbie-dash-know-db-reload", "^nknowdbreload$", "NebbieDash.cmdReloadKnowDb()"),

@@ -1,5 +1,12 @@
 # CHANGELOG — nebbie-complete-dashboard-package
 
+## 1.15.66 — 2026-11-09
+
+- **nidentui**: finestra floating per gestire l’archivio identify — lista
+  paginata, filtri (testo / PG / solo cedibili), sort, dettaglio, elimina con
+  conferma, toggle cedibile, assegna possesso al PG attivo, export CSV.
+  Anche `nidentdb ui` / `nidentdb del <oggetto>`.
+
 ## 1.15.65 — 2026-11-09
 
 - **Sirio / prompt immortale**: il trigger usava pattern Lua (`%]`/`%s`) in

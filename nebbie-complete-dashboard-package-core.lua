@@ -9,7 +9,7 @@
 -- docs/mudlet/analysis/RECOMMENDATION.md. Pattern prompt/eq basati su dati reali
 -- forniti dall'utente (docs/mudlet/analysis/Q&A.md, Round 3).
 
-local PKG_VER = "1.15.65"
+local PKG_VER = "1.15.66"
 local PKG_REPO = "wizardmorgan/nebbie-mudlet-dashboard"
 local PKG_FILE = "nebbie-complete-dashboard-package.mpackage"
 -- @main su jsDelivr puo' restare stale (osservato: restava 1.15.56 mentre tip
@@ -1212,6 +1212,7 @@ NebbieDash.SHORTCUT_RESERVED = {
   nknowdb = true, nknowdbreload = true,
   npackageupdate = true,
   nchat = true,
+  nidentui = true,
   usa = true,
   nconfigdir = true,
   nsidebar = true,
@@ -2169,6 +2170,7 @@ function NebbieDash.teardownGui()
   NebbieDash._equipRatioDragReady = false
   NebbieDash._equipRatioDrag = nil
   NebbieDash.destroyChatWindow()
+  NebbieDash.destroyIdentUiWindow()
   pcall(setBorderLeft, 0)
   pcall(setBorderRight, 0)
 end
@@ -2495,6 +2497,601 @@ function NebbieDash.cmdChat(argStr)
   end
   cecho("<orange>[NebbieDash] Uso: <yellow>nchat<orange> | <yellow>nchat on|off|clear\n")
   cecho("<grey>Raccoglie: say, gt/gtell, tell, whisper, ask, gossip, shout.\n")
+end
+
+-- ---------------------------------------------------------------------------
+-- Finestra floating gestione archivio identify (nidentui).
+-- Lista filtrabile + dettaglio con azioni (elimina, cedibile, possesso, export).
+-- ---------------------------------------------------------------------------
+NebbieDash._identUiState = NebbieDash._identUiState or {
+  filter = "",
+  charFilter = "",
+  onlyCedibile = false,
+  sort = "name", -- name | recent | type
+  page = 1,
+  pageSize = 12,
+  view = "list", -- list | detail
+  selectedKey = nil,
+  pendingDeleteKey = nil,
+}
+
+function NebbieDash.canUseIdentUiWindow()
+  return NebbieDash.canUseChatWindow()
+end
+
+function NebbieDash.destroyIdentUiWindow()
+  if NebbieDash._identUiContainer then
+    if type(NebbieDash._identUiContainer.hide) == "function" then
+      pcall(function() NebbieDash._identUiContainer:hide() end)
+    end
+    if type(NebbieDash._identUiContainer.delete) == "function" then
+      pcall(function() NebbieDash._identUiContainer:delete() end)
+    end
+  end
+  for _, name in ipairs({ "NebbieDashIdentUiContainer", "NebbieDashIdentUi" }) do
+    if type(deleteWindow) == "function" then pcall(deleteWindow, name) end
+  end
+  NebbieDash._identUiContainer = nil
+  NebbieDash._identUiGeyser = nil
+  NebbieDash._identUiCreated = false
+  NebbieDash._identUiHidden = false
+  NebbieDash._identUiRows = nil
+end
+
+function NebbieDash.identUiCecho(text)
+  local g = NebbieDash._identUiGeyser
+  if g and type(g.cecho) == "function" then
+    g:cecho(text)
+  elseif type(cecho) == "function" then
+    cecho("NebbieDashIdentUi", text)
+  end
+end
+
+function NebbieDash.identUiCechoLink(text, command, hint)
+  local g = NebbieDash._identUiGeyser
+  if g and type(g.cechoLink) == "function" then
+    g:cechoLink(text, command, hint or "", true)
+  elseif type(cechoLink) == "function" then
+    cechoLink("NebbieDashIdentUi", text, command, hint or "", true)
+  else
+    NebbieDash.identUiCecho(text)
+  end
+end
+
+function NebbieDash.clearIdentUiWindow()
+  if NebbieDash._identUiGeyser and type(NebbieDash._identUiGeyser.clear) == "function" then
+    pcall(function() NebbieDash._identUiGeyser:clear() end)
+  elseif type(clearWindow) == "function" then
+    pcall(clearWindow, "NebbieDashIdentUi")
+  end
+end
+
+function NebbieDash.showIdentUiWindow()
+  if NebbieDash._identUiContainer and type(NebbieDash._identUiContainer.show) == "function" then
+    pcall(function() NebbieDash._identUiContainer:show() end)
+  elseif type(showWindow) == "function" then
+    pcall(showWindow, "NebbieDashIdentUiContainer")
+    pcall(showWindow, "NebbieDashIdentUi")
+  end
+  NebbieDash._identUiHidden = false
+end
+
+function NebbieDash.hideIdentUiWindow()
+  if NebbieDash._identUiContainer and type(NebbieDash._identUiContainer.hide) == "function" then
+    pcall(function() NebbieDash._identUiContainer:hide() end)
+  elseif type(hideWindow) == "function" then
+    pcall(hideWindow, "NebbieDashIdentUiContainer")
+    pcall(hideWindow, "NebbieDashIdentUi")
+  end
+  NebbieDash._identUiHidden = true
+end
+
+function NebbieDash.initIdentUiWindow()
+  if not NebbieDash.canUseIdentUiWindow() then
+    cecho("<orange>[NebbieDash] Finestra ident non disponibile (serve Adjustable.Container / Geyser).\n")
+    return false
+  end
+  if NebbieDash._identUiCreated and NebbieDash._identUiContainer then
+    NebbieDash.showIdentUiWindow()
+    NebbieDash.refreshIdentUi()
+    return true
+  end
+  NebbieDash.destroyIdentUiWindow()
+  local w, h = 560, 420
+  NebbieDash._identUiContainer = Adjustable.Container:new({
+    name = "NebbieDashIdentUiContainer",
+    x = "-580",
+    y = 80,
+    width = w,
+    height = h,
+    titleText = "Nebbie — Ident DB",
+    titleTxtColor = "white",
+    adjLabelstyle = [[
+      background-color: rgb(14, 14, 20);
+      border: 2px solid rgb(120, 90, 50);
+      border-radius: 6px;
+    ]],
+  })
+  local pad = 4
+  local titleH = 22
+  NebbieDash._identUiGeyser = Geyser.MiniConsole:new({
+    name = "NebbieDashIdentUi",
+    x = pad,
+    y = titleH,
+    width = "100%-" .. tostring(pad * 2),
+    height = "100%-" .. tostring(titleH + pad),
+  }, NebbieDash._identUiContainer)
+  NebbieDash._identUiGeyser:setColor(14, 14, 18, 255)
+  if type(setMiniConsoleFontSize) == "function" then
+    setMiniConsoleFontSize("NebbieDashIdentUi", NebbieDash.fontSize or 10)
+  end
+  if type(enableScrollBar) == "function" then
+    enableScrollBar("NebbieDashIdentUi", true)
+  end
+  if type(setMaxLines) == "function" then
+    setMaxLines("NebbieDashIdentUi", 4000)
+  end
+  if type(NebbieDash._identUiContainer.load) == "function" then
+    pcall(function() NebbieDash._identUiContainer:load() end)
+  end
+  NebbieDash._identUiCreated = true
+  NebbieDash._identUiHidden = false
+  NebbieDash.refreshIdentUi()
+  return true
+end
+
+function NebbieDash.deleteIdentEntry(key)
+  key = key or ""
+  if key == "" then return false, "chiave vuota" end
+  NebbieDash.identDb = NebbieDash.identDb or { entries = {} }
+  NebbieDash.identDb.entries = NebbieDash.identDb.entries or {}
+  if not NebbieDash.identDb.entries[key] then return false, "non trovato" end
+  NebbieDash.identDb.entries[key] = nil
+  if NebbieDash._identDropPending and NebbieDash._identDropPending.key == key then
+    NebbieDash._identDropPending = nil
+  end
+  local st = NebbieDash._identUiState
+  if st and st.selectedKey == key then
+    st.selectedKey = nil
+    st.view = "list"
+  end
+  if st and st.pendingDeleteKey == key then
+    st.pendingDeleteKey = nil
+  end
+  NebbieDash.scheduleIdentDbSave()
+  return true
+end
+
+function NebbieDash.getIdentEntryByKey(key)
+  return NebbieDash.identDb and NebbieDash.identDb.entries and NebbieDash.identDb.entries[key]
+end
+
+function NebbieDash.collectIdentUiEntries()
+  local st = NebbieDash._identUiState or {}
+  local results
+  if st.charFilter and st.charFilter ~= "" then
+    results = NebbieDash.listIdentDbByCharacter(st.charFilter)
+  else
+    results = NebbieDash.searchIdentDb(st.filter or "")
+  end
+  if st.charFilter and st.charFilter ~= "" and st.filter and st.filter ~= "" then
+    local q = st.filter:lower()
+    local filtered = {}
+    for _, e in ipairs(results) do
+      local hay = table.concat({
+        e.objectName or "", e.objectType or "", e.flags or "",
+        table.concat(e.affects or {}, " "),
+      }, " "):lower()
+      if hay:find(q, 1, true) then table.insert(filtered, e) end
+    end
+    results = filtered
+  end
+  if st.onlyCedibile then
+    local filtered = {}
+    for _, e in ipairs(results) do
+      if e.cedibile then table.insert(filtered, e) end
+    end
+    results = filtered
+  end
+  local sort = st.sort or "name"
+  table.sort(results, function(a, b)
+    if sort == "recent" then
+      return (a.lastAt or 0) > (b.lastAt or 0)
+    end
+    if sort == "type" then
+      local ta, tb = a.objectType or "", b.objectType or ""
+      if ta ~= tb then return ta < tb end
+    end
+    return (a.objectName or "") < (b.objectName or "")
+  end)
+  return results
+end
+
+function NebbieDash.identUiToolbar()
+  local st = NebbieDash._identUiState
+  NebbieDash.identUiCecho("<grey>Totale DB: <white>" .. tostring(NebbieDash.identDbEntryCount())
+    .. "  <grey>| filtro: <yellow>" .. ((st.filter ~= "" and st.filter) or "(nessuno)")
+    .. "  <grey>| PG: <yellow>" .. ((st.charFilter ~= "" and st.charFilter) or "tutti")
+    .. "  <grey>| sort: <yellow>" .. tostring(st.sort)
+    .. (st.onlyCedibile and "  <green>[solo cedibili]" or "")
+    .. "\n")
+  NebbieDash.identUiCechoLink("<cyan>[lista]", "NebbieDash.identUiShowList()", "Torna alla lista")
+  NebbieDash.identUiCecho(" ")
+  NebbieDash.identUiCechoLink("<cyan>[refresh]", "NebbieDash.refreshIdentUi()", "Ricarica vista")
+  NebbieDash.identUiCecho(" ")
+  NebbieDash.identUiCechoLink("<yellow>[sort nome]", "NebbieDash.identUiSetSort(\"name\")", "Ordina per nome")
+  NebbieDash.identUiCecho(" ")
+  NebbieDash.identUiCechoLink("<yellow>[sort data]", "NebbieDash.identUiSetSort(\"recent\")", "Ordina per ultimo ident")
+  NebbieDash.identUiCecho(" ")
+  NebbieDash.identUiCechoLink("<yellow>[sort tipo]", "NebbieDash.identUiSetSort(\"type\")", "Ordina per tipo")
+  NebbieDash.identUiCecho("\n")
+  NebbieDash.identUiCechoLink(
+    st.onlyCedibile and "<green>[cedibili: ON]" or "<grey>[cedibili: off]",
+    "NebbieDash.identUiToggleCedibileFilter()",
+    "Mostra solo oggetti cedibili")
+  NebbieDash.identUiCecho(" ")
+  if NebbieDash.currentChar and NebbieDash.currentChar ~= "" then
+    NebbieDash.identUiCechoLink(
+      "<magenta>[PG: " .. NebbieDash.currentChar .. "]",
+      string.format("NebbieDash.identUiSetCharFilter(%q)", NebbieDash.currentChar),
+      "Filtra possesso/ident del PG attivo")
+    NebbieDash.identUiCecho(" ")
+  end
+  NebbieDash.identUiCechoLink("<grey>[reset filtri]", "NebbieDash.identUiResetFilters()", "Azzera filtri")
+  NebbieDash.identUiCecho("\n")
+  NebbieDash.identUiCecho(
+    "<grey>Comandi: <yellow>nidentui filter &lt;testo&gt;<grey> · <yellow>nidentui char &lt;Pg&gt;<grey> · "
+      .. "<yellow>nidentui del &lt;ogg&gt;\n")
+  NebbieDash.identUiCecho("<grey>─────────────────────────────────────\n")
+end
+
+function NebbieDash.refreshIdentUi()
+  if not NebbieDash._identUiCreated or NebbieDash._identUiHidden then return end
+  NebbieDash.clearIdentUiWindow()
+  NebbieDash.identUiToolbar()
+  local st = NebbieDash._identUiState
+  if st.view == "detail" and st.selectedKey then
+    NebbieDash.renderIdentUiDetail(st.selectedKey)
+  else
+    NebbieDash.renderIdentUiList()
+  end
+end
+
+function NebbieDash.renderIdentUiList()
+  local st = NebbieDash._identUiState
+  local all = NebbieDash.collectIdentUiEntries()
+  local pageSize = st.pageSize or 12
+  local pages = math.max(1, math.ceil(#all / pageSize))
+  if st.page > pages then st.page = pages end
+  if st.page < 1 then st.page = 1 end
+  local from = (st.page - 1) * pageSize + 1
+  local to = math.min(#all, st.page * pageSize)
+  NebbieDash.identUiCecho(string.format(
+    "<green>%d risultati<grey> — pagina <white>%d/%d\n", #all, st.page, pages))
+  if #all == 0 then
+    NebbieDash.identUiCecho("<orange>(nessuna entry — prova nidentui reset oppure identify in gioco)\n")
+    return
+  end
+  if st.page > 1 then
+    NebbieDash.identUiCechoLink("<cyan>[« prec]", "NebbieDash.identUiPage(-1)", "Pagina precedente")
+    NebbieDash.identUiCecho("  ")
+  end
+  if st.page < pages then
+    NebbieDash.identUiCechoLink("<cyan>[succ »]", "NebbieDash.identUiPage(1)", "Pagina successiva")
+  end
+  if st.page > 1 or st.page < pages then
+    NebbieDash.identUiCecho("\n")
+  end
+
+  NebbieDash._identUiRows = {}
+  local rowIdx = 0
+  for i = from, to do
+    local entry = all[i]
+    rowIdx = rowIdx + 1
+    NebbieDash._identUiRows[rowIdx] = entry
+    local poss = entry.possession
+    local possTxt = ""
+    if poss and poss.status == "held" and poss.character then
+      possTxt = " <grey>@" .. poss.character
+    elseif poss and poss.status == "ground" then
+      possTxt = " <orange>@terra"
+    end
+    local ced = entry.cedibile and " <green>●" or " <grey>○"
+    local rare = entry.rare and " <orange>R" or ""
+    NebbieDash.identUiCecho(string.format("<grey>%2d. ", rowIdx))
+    NebbieDash.identUiCechoLink(
+      "<yellow>" .. (entry.objectName or "?"),
+      string.format("NebbieDash.identUiOpenRow(%d)", rowIdx),
+      "Apri dettaglio")
+    NebbieDash.identUiCecho(string.format(
+      " <white>(%s)%s%s%s\n",
+      entry.objectType or "?", ced, rare, possTxt))
+    NebbieDash.identUiCecho("    ")
+    NebbieDash.identUiCechoLink(
+      "<red>[x]",
+      string.format("NebbieDash.identUiAskDelete(%d)", rowIdx),
+      "Elimina entry")
+    NebbieDash.identUiCecho(" ")
+    NebbieDash.identUiCechoLink(
+      entry.cedibile and "<green>[ced]" or "<grey>[ced]",
+      string.format("NebbieDash.identUiToggleCedibileRow(%d)", rowIdx),
+      "Toggle cedibile")
+    if entry.affects and #entry.affects > 0 then
+      local short = table.concat(entry.affects, " | ")
+      if #short > 70 then short = short:sub(1, 67) .. "…" end
+      NebbieDash.identUiCecho(" <grey>" .. short)
+    end
+    NebbieDash.identUiCecho("\n")
+  end
+end
+
+function NebbieDash.renderIdentUiDetail(key)
+  local entry = NebbieDash.getIdentEntryByKey(key)
+  if not entry then
+    NebbieDash.identUiCecho("<orange>Entry non trovata.\n")
+    NebbieDash._identUiState.view = "list"
+    NebbieDash._identUiState.selectedKey = nil
+    return
+  end
+  NebbieDash._identUiRows = { entry }
+  for _, lineTxt in ipairs(NebbieDash.formatIdentDbEntry(entry, true)) do
+    NebbieDash.identUiCecho(lineTxt .. "\n")
+  end
+  NebbieDash.identUiCecho("<grey>─────────────────────────────────────\n")
+  NebbieDash.identUiCecho("<white>Azioni: ")
+  local pending = NebbieDash._identUiState.pendingDeleteKey == key
+  if pending then
+    NebbieDash.identUiCechoLink(
+      "<red><b>[CONFERMA ELIMINA]</b>",
+      "NebbieDash.identUiConfirmDelete()",
+      "Conferma eliminazione definitiva")
+    NebbieDash.identUiCecho(" ")
+    NebbieDash.identUiCechoLink(
+      "<grey>[annulla]",
+      "NebbieDash.identUiCancelDelete()",
+      "Annulla eliminazione")
+  else
+    NebbieDash.identUiCechoLink(
+      "<red>[elimina]",
+      "NebbieDash.identUiAskDelete(1)",
+      "Chiedi conferma eliminazione")
+  end
+  NebbieDash.identUiCecho(" ")
+  NebbieDash.identUiCechoLink(
+    entry.cedibile and "<green>[togli cedibile]" or "<yellow>[rendi cedibile]",
+    "NebbieDash.identUiToggleCedibileRow(1)",
+    "Toggle flag cedibile")
+  NebbieDash.identUiCecho("\n")
+  if NebbieDash.currentChar and NebbieDash.currentChar ~= "" then
+    NebbieDash.identUiCechoLink(
+      "<magenta>[possesso → " .. NebbieDash.currentChar .. "]",
+      string.format("NebbieDash.identUiAssignHold(%q)", NebbieDash.currentChar),
+      "Assegna possesso al PG attivo")
+    NebbieDash.identUiCecho(" ")
+  end
+  local who = (entry.possession and entry.possession.character)
+    or entry.lastCharacter
+  if who and who ~= "" then
+    NebbieDash.identUiCechoLink(
+      "<cyan>[export CSV " .. who .. "]",
+      string.format("NebbieDash.identUiExportChar(%q)", who),
+      "Esporta CSV identify di questo PG")
+  end
+  NebbieDash.identUiCecho("\n")
+end
+
+function NebbieDash.identUiShowList()
+  local st = NebbieDash._identUiState
+  st.view = "list"
+  st.selectedKey = nil
+  st.pendingDeleteKey = nil
+  NebbieDash.refreshIdentUi()
+end
+
+function NebbieDash.identUiOpenRow(idx)
+  local entry = NebbieDash._identUiRows and NebbieDash._identUiRows[idx]
+  if not entry then return end
+  local st = NebbieDash._identUiState
+  st.view = "detail"
+  st.selectedKey = entry.key
+  st.pendingDeleteKey = nil
+  NebbieDash.refreshIdentUi()
+end
+
+function NebbieDash.identUiAskDelete(idx)
+  local entry = NebbieDash._identUiRows and NebbieDash._identUiRows[idx]
+  if not entry or not entry.key then return end
+  NebbieDash._identUiState.pendingDeleteKey = entry.key
+  if NebbieDash._identUiState.view ~= "detail" then
+    NebbieDash._identUiState.view = "detail"
+    NebbieDash._identUiState.selectedKey = entry.key
+  end
+  NebbieDash.refreshIdentUi()
+  cecho("<orange>[NebbieDash] Conferma eliminazione di <white>"
+    .. (entry.objectName or entry.key) .. "<orange> nella finestra Ident.\n")
+end
+
+function NebbieDash.identUiCancelDelete()
+  NebbieDash._identUiState.pendingDeleteKey = nil
+  NebbieDash.refreshIdentUi()
+end
+
+function NebbieDash.identUiConfirmDelete()
+  local key = NebbieDash._identUiState.pendingDeleteKey
+  if not key then return end
+  local entry = NebbieDash.getIdentEntryByKey(key)
+  local name = entry and entry.objectName or key
+  local ok = NebbieDash.deleteIdentEntry(key)
+  if ok then
+    cecho("<green>[NebbieDash] Ident eliminato: <white>" .. tostring(name) .. "\n")
+  else
+    cecho("<orange>[NebbieDash] Eliminazione fallita per <white>" .. tostring(key) .. "\n")
+  end
+  NebbieDash._identUiState.pendingDeleteKey = nil
+  NebbieDash._identUiState.view = "list"
+  NebbieDash._identUiState.selectedKey = nil
+  NebbieDash.refreshIdentUi()
+end
+
+function NebbieDash.identUiToggleCedibileRow(idx)
+  local entry = NebbieDash._identUiRows and NebbieDash._identUiRows[idx]
+  if not entry then return end
+  NebbieDash.setIdentCedibile(entry, not entry.cedibile, true)
+  cecho(string.format(
+    "<green>[NebbieDash] <white>%s<green> → %s\n",
+    entry.objectName or "?",
+    entry.cedibile and "cedibile" or "non cedibile"))
+  NebbieDash.refreshIdentUi()
+end
+
+function NebbieDash.identUiAssignHold(charName)
+  local key = NebbieDash._identUiState.selectedKey
+  local entry = NebbieDash.getIdentEntryByKey(key)
+  if not entry then return end
+  NebbieDash.setIdentPossession(entry, "held", charName, "hold", nil,
+    entry.possession and entry.possession.character)
+  cecho(string.format(
+    "<green>[NebbieDash] Possesso <white>%s<green> → <yellow>%s\n",
+    entry.objectName or "?", charName))
+  NebbieDash.refreshIdentUi()
+end
+
+function NebbieDash.identUiExportChar(charName)
+  NebbieDash.exportIdentDbCsvForCharacter(charName)
+end
+
+function NebbieDash.identUiSetSort(sort)
+  NebbieDash._identUiState.sort = sort or "name"
+  NebbieDash._identUiState.page = 1
+  NebbieDash._identUiState.view = "list"
+  NebbieDash.refreshIdentUi()
+end
+
+function NebbieDash.identUiToggleCedibileFilter()
+  local st = NebbieDash._identUiState
+  st.onlyCedibile = not st.onlyCedibile
+  st.page = 1
+  st.view = "list"
+  NebbieDash.refreshIdentUi()
+end
+
+function NebbieDash.identUiSetCharFilter(charName)
+  local st = NebbieDash._identUiState
+  if st.charFilter == charName then
+    st.charFilter = ""
+  else
+    st.charFilter = charName or ""
+  end
+  st.page = 1
+  st.view = "list"
+  NebbieDash.refreshIdentUi()
+end
+
+function NebbieDash.identUiResetFilters()
+  local st = NebbieDash._identUiState
+  st.filter = ""
+  st.charFilter = ""
+  st.onlyCedibile = false
+  st.sort = "name"
+  st.page = 1
+  st.view = "list"
+  st.pendingDeleteKey = nil
+  NebbieDash.refreshIdentUi()
+end
+
+function NebbieDash.identUiPage(delta)
+  local st = NebbieDash._identUiState
+  st.page = (st.page or 1) + (delta or 0)
+  st.view = "list"
+  NebbieDash.refreshIdentUi()
+end
+
+function NebbieDash.cmdIdentUi(argStr)
+  argStr = (argStr or ""):match("^%s*(.-)%s*$") or ""
+  local mode, rest = argStr:match("^(%S+)%s+(.-)%s*$")
+  if not mode then mode, rest = argStr, "" end
+  mode = (mode or ""):lower()
+
+  if mode == "off" or mode == "hide" or mode == "close" then
+    NebbieDash.hideIdentUiWindow()
+    cecho("<grey>[NebbieDash] Finestra Ident nascosta (<yellow>nidentui<grey> per riaprire).\n")
+    return
+  end
+
+  if mode == "filter" or mode == "cerca" or mode == "q" then
+    NebbieDash._identUiState.filter = rest or ""
+    NebbieDash._identUiState.page = 1
+    NebbieDash._identUiState.view = "list"
+    if not NebbieDash.initIdentUiWindow() then return end
+    NebbieDash.refreshIdentUi()
+    return
+  end
+
+  if mode == "char" or mode == "pg" then
+    NebbieDash._identUiState.charFilter = rest or ""
+    NebbieDash._identUiState.page = 1
+    NebbieDash._identUiState.view = "list"
+    if not NebbieDash.initIdentUiWindow() then return end
+    NebbieDash.refreshIdentUi()
+    return
+  end
+
+  if mode == "reset" then
+    NebbieDash.identUiResetFilters()
+    if not NebbieDash.initIdentUiWindow() then return end
+    return
+  end
+
+  if mode == "del" or mode == "delete" or mode == "rm" then
+    local results = NebbieDash.searchIdentDb(rest)
+    if not results or #results == 0 then
+      cecho("<orange>[NebbieDash] Nessun identify per <white>" .. tostring(rest) .. "\n")
+      return
+    end
+    if #results > 1 then
+      cecho("<orange>[NebbieDash] Query ambigua (" .. tostring(#results)
+        .. "). Apri <yellow>nidentui<orange> e elimina dalla lista, oppure specifica meglio.\n")
+      for i, e in ipairs(results) do
+        if i > 8 then break end
+        cecho(string.format("  <grey>%s<white> %s\n", e.key or "?", e.objectName or "?"))
+      end
+      return
+    end
+    local entry = results[1]
+    local ok = NebbieDash.deleteIdentEntry(entry.key)
+    if ok then
+      cecho("<green>[NebbieDash] Ident eliminato: <white>" .. tostring(entry.objectName) .. "\n")
+      NebbieDash.refreshIdentUi()
+    end
+    return
+  end
+
+  if mode == "help" or mode == "?" then
+    cecho("<green>[NebbieDash] nidentui — gestore floating archivio identify\n")
+    cecho("<grey>  <yellow>nidentui<grey>              apri / mostra finestra\n")
+    cecho("<grey>  <yellow>nidentui filter &lt;testo&gt;<grey>  filtra nome/flags/affects\n")
+    cecho("<grey>  <yellow>nidentui char &lt;Pg&gt;<grey>     filtra per personaggio\n")
+    cecho("<grey>  <yellow>nidentui del &lt;oggetto&gt;<grey>  elimina (se univoco)\n")
+    cecho("<grey>  <yellow>nidentui reset<grey>         azzera filtri\n")
+    cecho("<grey>  <yellow>nidentui off<grey>            nascondi finestra\n")
+    cecho("<grey>In finestra: click nome=dettaglio, [x]=elimina, [ced]=cedibile, sort/pagine.\n")
+    return
+  end
+
+  if not NebbieDash.initIdentUiWindow() then return end
+  if mode == "" or mode == "on" or mode == "show" or mode == "open" or mode == "toggle" then
+    if NebbieDash._identUiHidden then
+      NebbieDash.showIdentUiWindow()
+      NebbieDash.refreshIdentUi()
+    end
+    cecho("<green>[NebbieDash] Finestra Ident aperta (<yellow>nidentui help<green> per comandi).\n")
+    return
+  end
+  -- testo libero = filtro
+  NebbieDash._identUiState.filter = argStr
+  NebbieDash._identUiState.page = 1
+  NebbieDash._identUiState.view = "list"
+  NebbieDash.refreshIdentUi()
 end
 
 function NebbieDash.equipDividerPointerY(event)
@@ -2849,6 +3446,9 @@ NebbieDash.HELP_TEXT = {
   { "nidentdb hold <ogg> <Pg>", "Assegna possesso identify a un PG (senza drop pendente)." },
   { "nidentdb cedibile <ogg>", "Marca l'oggetto come cedibile (inventario give/drop)." },
   { "nidentdb noncedibile <ogg>", "Toglie il flag cedibile (give/drop non lo toccano)." },
+  { "nidentdb del <ogg>", "Elimina una entry identify (se la query e' univoca)." },
+  { "nidentui", "Finestra floating per gestire l'archivio identify (lista, filtri, elimina)." },
+  { "nidentui filter|char|del|reset", "Filtri / elimina / reset nella finestra Ident." },
   { "nidentdb export <NomePg>", "CSV di tutti gli identify di un PG (file NomePg-gg-mm-aaaa-hh-mm-ss.csv)." },
   { "nidentdbreload", "Ricarica nebbie-ident-db.lua dalla cartella condivisa." },
   { "nknowdb [query]", "Cerca nell'archivio know monster condiviso (profiles/ndashboard)." },
@@ -4048,6 +4648,9 @@ function NebbieDash.upsertIdentRecord(parsed, character, source)
   NebbieDash.applyCedibileFromFlags(existing, existing.flags)
   NebbieDash.identDb.entries[key] = existing
   NebbieDash.scheduleIdentDbSave()
+  if NebbieDash._identUiCreated and not NebbieDash._identUiHidden then
+    NebbieDash.refreshIdentUi()
+  end
   return existing
 end
 
@@ -4736,9 +5339,20 @@ function NebbieDash.cmdIdentDb(argStr)
     cecho("<grey>Uso: <yellow>nidentdb <query><grey> | <yellow>nidentdb where <query><grey> | <yellow>nidentdb char <nome>\n")
     cecho("<grey>     <yellow>nidentdb hold <NomePg><grey> | <yellow>nidentdb hold <oggetto> <NomePg>\n")
     cecho("<grey>     <yellow>nidentdb cedibile <oggetto><grey> | <yellow>nidentdb noncedibile <oggetto>\n")
+    cecho("<grey>     <yellow>nidentdb del <oggetto><grey> | <yellow>nidentdb ui<grey> (= nidentui)\n")
     cecho("<grey>     <yellow>nidentdb export <NomePg><grey> | <yellow>nidentdbreload\n")
     cecho("<grey>Give/drop aggiornano solo oggetti <white>cedibili<grey> (auto con PROCAREA-REWARD).\n")
     cecho("<grey>Stesso nome + stesse stats/affects = aggiorna; stats diverse = nuova entry #2/#3…\n")
+    return
+  end
+
+  if mode == "ui" or mode == "gui" or mode == "window" then
+    NebbieDash.cmdIdentUi(rest)
+    return
+  end
+
+  if mode == "del" or mode == "delete" or mode == "rm" then
+    NebbieDash.cmdIdentUi("del " .. (rest or ""))
     return
   end
 

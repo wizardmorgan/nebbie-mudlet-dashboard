@@ -152,6 +152,22 @@ con suffisso `#2`, `#3`, …; stesso nome **e** stesse stats → aggiorna l’en
 `where` mostra anche il possesso tracciato e l’incrocio con la cache equip (serve aver fatto
 `nresync`/`neq` sui PG rilevanti).
 
+### Finestra gestore (`nidentui`)
+
+Dalla **1.15.66** puoi aprire una floating window per navigare e modificare il DB:
+
+```
+nidentui
+nidentui filter mantello
+nidentui char NomiyaMaki
+nidentui del anello varco
+nidentui reset
+nidentui off
+```
+
+In finestra (click): apri dettaglio, elimina (con conferma), toggle cedibile, sort/pagine,
+filtro solo-cedibili, filtro PG attivo, assegna possesso al PG corrente, export CSV.
+
 ## Archivio know monster (`nknowdb`)
 
 Dalla **1.15.55** ogni `cast 'know monster'` riuscito su un NPC aggiorna
