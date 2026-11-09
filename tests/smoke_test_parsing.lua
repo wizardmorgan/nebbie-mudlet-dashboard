@@ -1067,6 +1067,14 @@ check("verify: sezione osave OK con messaggio server", vok and #vissues == 0)
 local imm = NebbieDash.parseImmortalPromptLine("Sirio R1000 [On//60]>>")
 check("batch: parseImmortalPromptLine Sirio", imm and imm.name == "Sirio")
 check("batch: isAnyPromptLine prompt immortale", NebbieDash.isAnyPromptLine("Sirio R1000 [On//60]>>") ~= nil)
+check("prompt imm: Sirio R13886 [On//58]>>",
+  (NebbieDash.parseImmortalPromptLine("Sirio R13886 [On//58]>>") or {}).name == "Sirio")
+check("prompt imm: strip colori $c",
+  (NebbieDash.parseImmortalPromptLine("$c0015Sirio R20 [On//58]>>") or {}).name == "Sirio")
+check("prompt imm: leading space",
+  (NebbieDash.parseImmortalPromptLine("  Sirio R20 [On//58]>>") or {}).name == "Sirio")
+check("prompt imm: rifiuta nome non alfanumerico grezzo",
+  NebbieDash.parseImmortalPromptLine("*** R20 [On//58]>>") == nil)
 check("batch: isAnyPromptLine non confonde riga narrativa",
   NebbieDash.isAnyPromptLine("Adesso hai Elmo della Citta d'Ottone.") == nil)
 

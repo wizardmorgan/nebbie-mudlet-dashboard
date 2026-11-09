@@ -1,5 +1,12 @@
 # CHANGELOG — nebbie-complete-dashboard-package
 
+## 1.15.65 — 2026-11-09
+
+- **Sirio / prompt immortale**: il trigger usava pattern Lua (`%]`/`%s`) in
+  `tempRegexTrigger` (PCRE) → non scattava mai; serviva sempre `nchar Sirio`.
+  Corretto a `\]\s*>>\s*$` + fallback substring `]>>`. Stesso bug sul trigger
+  «sulle spalle» (wear zaino).
+
 ## 1.15.64 — 2026-11-08
 
 - **usa / slot schiena**: `onWearBackLine` chiudeva il guard con

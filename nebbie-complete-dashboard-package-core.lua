@@ -9,7 +9,7 @@
 -- docs/mudlet/analysis/RECOMMENDATION.md. Pattern prompt/eq basati su dati reali
 -- forniti dall'utente (docs/mudlet/analysis/Q&A.md, Round 3).
 
-local PKG_VER = "1.15.64"
+local PKG_VER = "1.15.65"
 local PKG_REPO = "wizardmorgan/nebbie-mudlet-dashboard"
 local PKG_FILE = "nebbie-complete-dashboard-package.mpackage"
 -- @main su jsDelivr puo' restare stale (osservato: restava 1.15.56 mentre tip
@@ -843,16 +843,21 @@ end
 -- Prompt immortale/builder (es. Sirio): "Sirio R1000 [On//60]>>" — confermato
 -- dall'utente 2026-09-21. Il trigger " M:" non matcha mai questo formato, quindi
 -- nbatch (che attendeva onPromptLine) andava in timeout anche con prompt visibile.
+-- NOTA: tempRegexTrigger usa PCRE, NON pattern Lua (%s/%d).
 function NebbieDash.parseImmortalPromptLine(text)
   if not text or text == "" then return nil end
+  text = NebbieDash.stripColors(text):match("^%s*(.-)%s*$") or ""
   local name = text:match("^(%S+)%s+R%d+%s+%[[^%]]+%]%s*>>%s*$")
   if not name then return nil end
+  -- Evita nomi contaminati da residui colore se strip fallisce in parte.
+  if not name:match("^[%a][%w_%-]*$") then return nil end
   return { name = name, immortal = true }
 end
 
 function NebbieDash.isAnyPromptLine(text)
   return NebbieDash.parsePromptLine(text) or NebbieDash.parseImmortalPromptLine(text)
-      or (text and text:match("^>>%s*$") and { name = NebbieDash.currentChar or "?" })
+      or (text and NebbieDash.stripColors(text):match("^%s*>>%s*$")
+        and { name = NebbieDash.currentChar or "?" })
 end
 
 function NebbieDash.onPromptLine()
@@ -860,9 +865,10 @@ function NebbieDash.onPromptLine()
   if (not text or text == "") and type(getCurrentLine) == "function" then
     text = getCurrentLine()
   end
-  local parsed = NebbieDash.parsePromptLine(text or "")
+  text = NebbieDash.stripColors(text or ""):match("^%s*(.-)%s*$") or ""
+  local parsed = NebbieDash.parsePromptLine(text)
   if not parsed then
-    parsed = NebbieDash.parseImmortalPromptLine(text or "")
+    parsed = NebbieDash.parseImmortalPromptLine(text)
   end
   if not parsed then return end
   NebbieDash.stats = parsed
@@ -3713,6 +3719,7 @@ end
 
 function NebbieDash.onWearBackLine()
   local text = line or (type(getCurrentLine) == "function" and getCurrentLine()) or ""
+  text = NebbieDash.stripColors(text)
   local itemName = text:match("^Ti metti (.+) sulle spalle%.%s*$")
   if not itemName then return end
   local name = NebbieDash.currentChar
@@ -7719,7 +7726,8 @@ end
 -- stesso di ri-registrare i trigger dopo il primo avvio della sessione.
 function NebbieDash.teardownTriggers()
   local ids = {
-    NebbieDash._promptTrig, NebbieDash._promptImmTrig, NebbieDash._eqOpenTrig, NebbieDash._attribOpenTrig,
+    NebbieDash._promptTrig, NebbieDash._promptImmTrig, NebbieDash._promptImmTrig2,
+    NebbieDash._eqOpenTrig, NebbieDash._attribOpenTrig,
     NebbieDash._eqLineTrig, NebbieDash._attribLineTrig, NebbieDash._lootLineTrig,
     NebbieDash._lootLineTrig2, NebbieDash._groupSoloTrig, NebbieDash._groupHeaderTrig, NebbieDash._combatEndTrig,
     NebbieDash._combatEndTrig2,
@@ -7728,7 +7736,7 @@ function NebbieDash.teardownTriggers()
     NebbieDash._identKnowledgeTrig, NebbieDash._identSourceSpellTrig, NebbieDash._identSourceScrollTrig,
     NebbieDash._identLineTrig, NebbieDash._identGiveTrig, NebbieDash._identDropTrig,
     NebbieDash._knowRaceTrig, NebbieDash._knowSourceSpellTrig, NebbieDash._knowLineTrig,
-    NebbieDash._stopUsingTrig, NebbieDash._wearBackTrig,
+    NebbieDash._stopUsingTrig, NebbieDash._wearBackTrig, NebbieDash._wearBackTrig2,
   }
   for _, id in ipairs(ids) do
     if id then pcall(function() killTrigger(id) end) end
@@ -7756,9 +7764,12 @@ function NebbieDash.installTriggers()
   -- case-insensitive): il problema era solo nello shield del trigger, non
   -- nel parsing.
   NebbieDash._promptTrig = tempTrigger(" M:", [[NebbieDash.onPromptLine()]])
-  -- Prompt immortale (Sirio ecc.): "Nome R### [....]>>" — necessario per nbatch e
-  -- rilevamento PG senza dipendere da nchar.
-  NebbieDash._promptImmTrig = tempRegexTrigger("%]%s*>>%s*$", [[NebbieDash.onPromptLine()]])
+  -- Prompt immortale (Sirio ecc.): "Nome R### [....]>>"
+  -- tempRegexTrigger = PCRE (NON Lua): \] \s  — il vecchio "%]%s*>>%s*$" non
+  -- matchava MAI, quindi Sirio restava "nessun personaggio" senza nchar.
+  NebbieDash._promptImmTrig = tempRegexTrigger("\\]\\s*>>\\s*$", [[NebbieDash.onPromptLine()]])
+  -- Cintura: substring su "]>>" (formati senza spazi tra ] e >>).
+  NebbieDash._promptImmTrig2 = tempTrigger("]>>", [[NebbieDash.onPromptLine()]])
   NebbieDash._eqOpenTrig = tempTrigger("Stai usando:", [[NebbieDash.startEqCapture()]])
   NebbieDash._attribOpenTrig = tempTrigger("Spells attivi", [[NebbieDash.startAttribCapture()]])
   NebbieDash._eqLineTrig = tempRegexTrigger("^", [[NebbieDash.onEqCaptureLine()]])
@@ -7790,7 +7801,10 @@ function NebbieDash.installTriggers()
   -- tipo di danno SOLO quando l'utente esegue quel comando di sua iniziativa.
   NebbieDash._wieldTrig = tempTrigger("Impugni ", [[NebbieDash.onWieldLine()]])
   NebbieDash._stopUsingTrig = tempTrigger("Smetti di usare ", [[NebbieDash.onStopUsingLine()]])
-  NebbieDash._wearBackTrig = tempRegexTrigger("^Ti metti .+ sulle spalle%.%s*$", [[NebbieDash.onWearBackLine()]])
+  -- PCRE (non Lua): punto = \.  e whitespace = \s
+  NebbieDash._wearBackTrig = tempRegexTrigger("^Ti metti .+ sulle spalle\\.\\s*$", [[NebbieDash.onWearBackLine()]])
+  -- Fallback substring se il regex fallisce su varianti spaziature.
+  NebbieDash._wearBackTrig2 = tempTrigger("sulle spalle.", [[NebbieDash.onWearBackLine()]])
   NebbieDash._identifyObjTrig = tempTrigger("Tipo di Oggetto", [[NebbieDash.onIdentifyObjectLine()]])
   NebbieDash._identifyDmgTrig = tempTrigger("Tipo di danno:", [[NebbieDash.onIdentifyDamageLine()]])
   -- Archivio identify condiviso: start su "La conoscenza…"; fonte spell/scroll
