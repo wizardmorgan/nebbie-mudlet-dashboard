@@ -79,8 +79,8 @@ Nessun alias invia comandi al MUD in automatico all'avvio (scelta deliberata, ve
 | `nspeeddelay <secondi>` | Pausa tra un movimento e il successivo quando esegui uno speedwalk (default 0.35s). |
 | `nhelp` | Mostra/nasconde la finestra con l'elenco di tutti questi comandi (stessa finestra del tasto "? Comandi", vedi sotto). |
 | `nloot` | Prende le monete dal cadavere presente (prova sia `get all.coin corp` che `get all.coin pile`, per cadaveri normali e "pile of bones"). Normalmente non serve digitarlo: scatta da solo, vedi sotto. |
-| `nautoloot <on\|off>` | Attiva/disattiva il loot automatico alla fine di ogni combattimento a cui partecipi (default **on**). |
-| `nautosplit <on\|off>` | Attiva/disattiva lo split automatico col gruppo dopo ogni loot riuscito (default **on**). |
+| `nautoloot <on\|off>` | Attiva/disattiva il loot automatico alla fine di ogni combattimento a cui partecipi (default **on**; salvato in `nebbie-dash-preferences.txt`). |
+| `nautosplit <on\|off>` | Attiva/disattiva lo split automatico col gruppo dopo ogni loot riuscito (default **on**; salvato in `nebbie-dash-preferences.txt`). |
 | `nsplit <numero>` | Divide manualmente un importo col gruppo (equivalente a digitare `split <numero>`), utile per casi non coperti da `nloot`. |
 | `nautostand <on\|off>` | Attiva/disattiva il rialzarsi automatico (`stand`) dopo una caduta (default **on**). |
 | `nautodisarm <on\|off>` | Attiva/disattiva il recupero automatico dell'arma dopo un disarmo (default **on**). |
@@ -251,12 +251,11 @@ Alla fine di ogni combattimento a cui partecipi (riconosciuto da due messaggi re
 tua parte di esperienza è di N punti." per la quota di gruppo, oppure "La tua esperienza è aumentata
 di N punti." per un'uccisione in solitaria — anche con N=0), se `nautoloot` è attivo (default sì) il
 pacchetto prende da solo le monete dal cadavere presente. Appena il gioco conferma il bottino
-(`C'erano N monete.`), se `nautosplit` è attivo (default sì) e sei in gruppo, invia da solo `split N`
-con l'importo appena raccolto — verificando prima che tu sia in gruppo leggendo l'output del comando
-`group`. Se non sei in gruppo, il bottino resta semplicemente tuo, senza inviare nulla. Se più loot
-scattano quasi contemporaneamente (es. un incantesimo ad area che uccide più mostri in un colpo), gli
-importi si accumulano in un unico controllo gruppo/split invece di avviarne più di uno in
-sovrapposizione (evita split inviati/non inviati in base al controllo sbagliato).
+(`C'erano N monete.`), se `nautosplit` è attivo (default sì) invia `split N` con l'importo appena
+raccolto. Non spamma `group`: se il MUD risponde `Ma cosa vuoi dividere che sei solo.`, memorizza
+che sei solo e non ripete lo split finché non vede un `Hai diviso …` (o finché non fai
+`nautosplit on` di nuovo). Doppi echo / doppio trigger sulla stessa conferma loot vengono uniti
+(debounce ~1.2s). Lo stato on/off di `nautoloot` / `nautosplit` resta salvato nel file preferenze.
 
 I due automatismi sono indipendenti: puoi disattivare solo il loot (`nautoloot off`, es. se preferisci
 farlo tu a mano con `nloot` quando vuoi) o solo lo split (`nautosplit off`, usando poi `nsplit

@@ -68,10 +68,10 @@ profilo Mudlet, più personaggi, cambio automatico rilevato dal prompt).
 - Numero di riga tra parentesi quadre nel pannello equip, come nel testo di
   `eq` sul gioco (non e' pero' il numero di slot del gioco, solo la
   posizione nella nostra lista — vedi `nhelp`/`neq`).
-- **Loot + split automatico**: alla fine di ogni combattimento a cui hai
-  partecipato, prende da solo le monete dal cadavere (normale o "pile of
-  bones", `nloot` anche a mano) e, se sei in gruppo, divide l'importo con
-  `split` (disattivabili singolarmente con `nautoloot off`/`nautosplit off`).
+- **Loot + split automatico** (`nautoloot`/`nautosplit`, salvati nelle
+  preferenze): monete dal cadavere a fine fight; `split` dopo `C'erano`
+  senza spam `group`; se sei solo non ripete finché non torna un
+  `Hai diviso`.
 - **Rialzarsi e recupero arma automatici**: `stand` da solo dopo una caduta;
   dopo disarmo con arma a terra `get`/`wield`; se l'arma resta in mano (rune) solo `wield`
   (disattivabili con `nautostand off`/`nautodisarm off`).

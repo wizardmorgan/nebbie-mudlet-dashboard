@@ -1,5 +1,14 @@
 # CHANGELOG — nebbie-complete-dashboard-package
 
+## 1.15.68 — 2026-11-10
+
+- **nautoloot / nautosplit**: on/off salvati in `nebbie-dash-preferences.txt` (prima
+  si perdevano a ogni reload). Debounce su conferma loot e su split (niente doppio
+  `split` dallo stesso `C'erano`). Safety unlock se `_lootFlowActive` resta appeso.
+  Dopo `Ma cosa vuoi dividere che sei solo.` non ripete lo split finché non vede
+  `Hai diviso …` (o finché non riattivi `nautosplit on`). Rispetta davvero
+  `nautoloot off` anche nel timer ritardato.
+
 ## 1.15.67 — 2026-11-09
 
 - **nidentui**: testo guida senza `&lt;…&gt;` (cecho li mostrava letterali);

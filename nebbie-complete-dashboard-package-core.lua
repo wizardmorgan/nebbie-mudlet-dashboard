@@ -9,7 +9,7 @@
 -- docs/mudlet/analysis/RECOMMENDATION.md. Pattern prompt/eq basati su dati reali
 -- forniti dall'utente (docs/mudlet/analysis/Q&A.md, Round 3).
 
-local PKG_VER = "1.15.67"
+local PKG_VER = "1.15.68"
 local PKG_REPO = "wizardmorgan/nebbie-mudlet-dashboard"
 local PKG_FILE = "nebbie-complete-dashboard-package.mpackage"
 -- @main su jsDelivr puo' restare stale (osservato: restava 1.15.56 mentre tip
@@ -526,11 +526,15 @@ function NebbieDash.ensurePreferencesFile()
     "# sanity_neq_on_login = on  # se l'equip in cache è vuoto ma marcato sincronizzato, invia eq\n" ..
     "# text_highlights = on      # gemme/metalli + evidenziazioni aura/disarm/dig/sanc\n" ..
     "# chat_window = on          # finestra floating per say/gt/tell/whisper/ask/gossip/shout\n" ..
+    "# auto_loot = on            # loot monete a fine combattimento (nautoloot)\n" ..
+    "# auto_split = on           # split monete dopo loot riuscito (nautosplit)\n" ..
     "sidebar_mode = dock\n" ..
     "weapon_swap_delay = 0.5\n" ..
     "sanity_neq_on_login = on\n" ..
     "text_highlights = on\n" ..
-    "chat_window = on\n"
+    "chat_window = on\n" ..
+    "auto_loot = on\n" ..
+    "auto_split = on\n"
   )
   f:close()
 end
@@ -548,6 +552,8 @@ function NebbieDash.loadPreferences()
     sanity_neq_on_login = true,
     text_highlights = true,
     chat_window = true,
+    auto_loot = true,
+    auto_split = true,
   }
   local path = NebbieDash.preferencesPath()
   if type(io.exists) == "function" and io.exists(path) then
@@ -568,6 +574,10 @@ function NebbieDash.loadPreferences()
             NebbieDash.prefs.text_highlights = NebbieDash.parsePreferencesBool(val)
           elseif key == "chat_window" then
             NebbieDash.prefs.chat_window = NebbieDash.parsePreferencesBool(val)
+          elseif key == "auto_loot" then
+            NebbieDash.prefs.auto_loot = NebbieDash.parsePreferencesBool(val)
+          elseif key == "auto_split" then
+            NebbieDash.prefs.auto_split = NebbieDash.parsePreferencesBool(val)
           end
         end
       end
@@ -578,6 +588,8 @@ function NebbieDash.loadPreferences()
   NebbieDash.weaponSwapDelay = NebbieDash.prefs.weapon_swap_delay or NebbieDash.weaponSwapDelay
   NebbieDash.textHighlights = NebbieDash.prefs.text_highlights ~= false
   NebbieDash.chatEnabled = NebbieDash.prefs.chat_window ~= false
+  NebbieDash.autoLoot = NebbieDash.prefs.auto_loot ~= false
+  NebbieDash.autoSplit = NebbieDash.prefs.auto_split ~= false
 end
 
 function NebbieDash.savePreferencesFile()
@@ -591,7 +603,9 @@ function NebbieDash.savePreferencesFile()
     "weapon_swap_delay = " .. tostring(NebbieDash.weaponSwapDelay or 0.5) .. "\n" ..
     "sanity_neq_on_login = " .. ((NebbieDash.prefs and NebbieDash.prefs.sanity_neq_on_login) and "on" or "off") .. "\n" ..
     "text_highlights = " .. ((NebbieDash.prefs and NebbieDash.prefs.text_highlights ~= false) and "on" or "off") .. "\n" ..
-    "chat_window = " .. ((NebbieDash.chatEnabled ~= false) and "on" or "off") .. "\n"
+    "chat_window = " .. ((NebbieDash.chatEnabled ~= false) and "on" or "off") .. "\n" ..
+    "auto_loot = " .. ((NebbieDash.autoLoot ~= false) and "on" or "off") .. "\n" ..
+    "auto_split = " .. ((NebbieDash.autoSplit ~= false) and "on" or "off") .. "\n"
   )
   f:close()
 end
@@ -814,6 +828,13 @@ function NebbieDash.onConnectionEvent()
   NebbieDash.currentChar = nil
   NebbieDash._awaitingPromptAfterConnect = true
   NebbieDash._sanityNeqForChar = {}
+  NebbieDash._groupKnown = nil
+  NebbieDash._lootFlowActive = false
+  NebbieDash._lootFlowStartedAt = nil
+  NebbieDash._lastLootAmount = nil
+  NebbieDash._lastLootAt = nil
+  NebbieDash._lastSplitAmount = nil
+  NebbieDash._lastSplitAt = nil
   NebbieDash.refreshDashboard()
 end
 
@@ -3924,32 +3945,26 @@ function NebbieDash.isGroupHeaderLine(text)
   return text:match("^Your group .-consists of:") ~= nil
 end
 
--- Solo le due righe di fine combattimento reali (non "La tua parte e' di N monete"
--- dello split altrui, achievement, ecc.).
+-- Righe di fine combattimento (fight.cpp). Variante senza "punti" esiste per NPC.
+-- Non usare "La tua parte e' di N monete." (messaggio split).
 function NebbieDash.isCombatExpLine(text)
   text = NebbieDash.stripColors(text or ""):match("^%s*(.-)%s*$") or ""
   if text:match("^La tua parte di esperienza e' di %d+ punti%.%s*$") then return true end
+  if text:match("^La tua parte di esperienza e' di %d+%.%s*$") then return true end
   if text:match("^La tua esperienza e' aumentata di %d+ punti%.%s*$") then return true end
   return false
 end
 
--- Segnale di fine combattimento: due formati REALI confermati dall'utente —
--- "La tua parte di esperienza e' di N punti." (quota di gruppo) e "La tua
--- esperienza e' aumentata di N punti." (uccisione in solitaria, testo
--- fornito il 2026-08-10 con "Gwynyar is dead!"/"A mindflayer is dead!" ecc.
--- — senza questo secondo shield l'autoloot non scattava affatto per le
--- uccisioni in solitaria con questa frase). Entrambi sempre attivi (stesso
--- principio degli altri trigger a riga singola). Fanno scattare `nloot` da
--- solo se `nautoloot` e' attivo, cosi' non serve piu' digitarlo manualmente
--- dopo ogni uccisione.
+-- Segnale di fine combattimento → nloot se nautoloot on.
 function NebbieDash.onCombatEndLine()
-  if not NebbieDash.autoLoot then return end
+  if NebbieDash.autoLoot == false then return end
   local text = line or (type(getCurrentLine) == "function" and getCurrentLine()) or ""
   if not NebbieDash.isCombatExpLine(text) then return end
   NebbieDash.scheduleAutoLoot()
 end
 
 function NebbieDash.scheduleAutoLoot()
+  if NebbieDash.autoLoot == false then return end
   local now = os.clock()
   if NebbieDash._lastAutoLootClock and (now - NebbieDash._lastAutoLootClock) < 0.6 then
     return
@@ -3958,10 +3973,10 @@ function NebbieDash.scheduleAutoLoot()
   if NebbieDash._autoLootDelayTimer and type(killTimer) == "function" then
     pcall(killTimer, NebbieDash._autoLootDelayTimer)
   end
-  -- Breve attesa: il cadavere compare spesso un attimo dopo la riga exp; evita
-  -- get a vuoto e riduce i doppi invii se piu' trigger scattano sulla stessa riga.
+  -- Breve attesa: il cadavere compare spesso un attimo dopo la riga exp.
   NebbieDash._autoLootDelayTimer = tempTimer(0.35, function()
     NebbieDash._autoLootDelayTimer = nil
+    if NebbieDash.autoLoot == false then return end
     NebbieDash.cmdLoot()
   end)
 end
@@ -7002,36 +7017,55 @@ function NebbieDash.cmdSetAutoLoot(argStr)
     NebbieDash.autoLoot = true
   elseif argStr == "off" then
     NebbieDash.autoLoot = false
+    if NebbieDash._autoLootDelayTimer and type(killTimer) == "function" then
+      pcall(killTimer, NebbieDash._autoLootDelayTimer)
+      NebbieDash._autoLootDelayTimer = nil
+    end
   else
     cecho("<orange>[NebbieDash] Uso: nautoloot <on|off> (attuale: " ..
-      (NebbieDash.autoLoot and "on" or "off") .. ")\n")
+      ((NebbieDash.autoLoot ~= false) and "on" or "off") .. ")\n")
     return
   end
-  cecho("<green>[NebbieDash] Loot automatico dopo ogni combattimento: " .. (NebbieDash.autoLoot and "on" or "off") .. ".\n")
+  NebbieDash.prefs = NebbieDash.prefs or {}
+  NebbieDash.prefs.auto_loot = NebbieDash.autoLoot and true or false
+  NebbieDash.savePreferencesFile()
+  cecho("<green>[NebbieDash] Loot automatico dopo ogni combattimento: " ..
+    ((NebbieDash.autoLoot ~= false) and "on" or "off") .. " <grey>(salvato).\n")
 end
 
--- Riga di conferma loot riuscito ("C'erano N monete."): shield su substring
--- fissa "C'erano" (vedi MUDLET-WIKI-NOTES.md §1 su shielding/costo dei
--- trigger), poi verifica precisa col pattern completo dentro l'handler.
--- Sempre attivo (costo trascurabile, stesso principio del trigger prompt
--- " M: " gia' presente): non richiede uno stato di "cattura" perche' e' una
--- riga singola e autosufficiente, a differenza dei blocchi eq/attrib.
+-- Riga di conferma loot riuscito ("C'erano N monete.").
 function NebbieDash.onLootLine()
   local text = line or (type(getCurrentLine) == "function" and getCurrentLine()) or ""
   local amount = NebbieDash.parseLootCoinAmount(text)
   if not amount then return end
+  -- Debounce: stesso importo entro 1.2s (doppio trigger / echo) → una sola volta.
+  local now = os.clock()
+  if NebbieDash._lastLootAmount == amount
+      and NebbieDash._lastLootAt
+      and (now - NebbieDash._lastLootAt) < 1.2 then
+    return
+  end
+  NebbieDash._lastLootAmount = amount
+  NebbieDash._lastLootAt = now
   cecho("<green>[NebbieDash] Bottino: " .. amount .. " monete.\n")
-  if NebbieDash.autoSplit then
+  if NebbieDash.autoSplit ~= false then
     NebbieDash.startSplitFlow(amount)
   end
 end
 
--- Invia i due comandi di loot noti (cadavere normale + pile of bones): solo
--- uno dei due potra' avere successo per singolo cadavere, l'altro risponde
--- con un semplice "Non vedi nessun ..." innocuo che non fa scattare nulla.
+-- Invia i due comandi di loot noti (cadavere normale + pile of bones).
 function NebbieDash.cmdLoot()
-  if NebbieDash._lootFlowActive then return end
+  local now = os.clock()
+  -- Se un flusso precedente e' rimasto appeso (>2s), sblocca.
+  if NebbieDash._lootFlowActive then
+    local started = NebbieDash._lootFlowStartedAt or 0
+    if (now - started) < 2.0 then
+      return
+    end
+    NebbieDash._lootFlowActive = false
+  end
   NebbieDash._lootFlowActive = true
+  NebbieDash._lootFlowStartedAt = now
   NebbieDash._lootFlowGen = (NebbieDash._lootFlowGen or 0) + 1
   local gen = NebbieDash._lootFlowGen
   if NebbieDash._lootPileTimer and type(killTimer) == "function" then
@@ -7043,19 +7077,31 @@ function NebbieDash.cmdLoot()
     if NebbieDash._lootFlowGen ~= gen then return end
     NebbieDash._lootPileTimer = nil
     send("get all.coin pile", false)
-    tempTimer(0.15, function()
-      if NebbieDash._lootFlowGen == gen then
-        NebbieDash._lootFlowActive = false
-      end
-    end)
+  end)
+  -- Safety: sblocca sempre, anche se i timer intermedi falliscono.
+  tempTimer(2.2, function()
+    if NebbieDash._lootFlowGen == gen then
+      NebbieDash._lootFlowActive = false
+    end
   end)
 end
 
--- Stesso watchdog "a inattivita'" gia' usato per le catture eq/attrib (vedi
--- armEqWatchdog): se ne' "But you are a member of no group" ne' "Your
--- group " arrivano entro pochi secondi (formato imprevisto, lag, ecc.), il
--- controllo si annulla da solo invece di lasciare i trigger di verifica
--- attivi per sempre.
+-- Memoria gruppo senza spam "group": dopo un fallimento "sei solo" non
+-- riprova finche' non vediamo un segnale di gruppo reale.
+function NebbieDash.onSplitSoloFailLine()
+  local text = NebbieDash.stripColors(
+    line or (type(getCurrentLine) == "function" and getCurrentLine()) or "")
+  if not text:find("Ma cosa vuoi dividere che sei solo", 1, true) then return end
+  NebbieDash._groupKnown = false
+end
+
+function NebbieDash.onSplitSuccessLine()
+  local text = NebbieDash.stripColors(
+    line or (type(getCurrentLine) == "function" and getCurrentLine()) or "")
+  if not text:match("^Hai diviso ") then return end
+  NebbieDash._groupKnown = true
+end
+
 function NebbieDash.armSplitWatchdog(gen)
   tempTimer(NebbieDash.captureTimeoutSec, function()
     if NebbieDash._groupCheckGen == gen and NebbieDash._groupCheckActive then
@@ -7064,25 +7110,22 @@ function NebbieDash.armSplitWatchdog(gen)
   end)
 end
 
--- Se un controllo gruppo e' GIA' in corso (loot quasi simultanei, es. piu'
--- uccisioni ravvicinate da un incantesimo ad area come "chain lightning" che
--- colpisce piu' mostri in un colpo), NON avviarne un secondo in parallelo:
--- prima si sovrascriveva _pendingSplitAmount/si incrementava la generazione
--- SENZA che onGroupSoloLine()/onGroupHeaderLine() verificassero a quale
--- generazione appartenesse davvero la risposta "group" arrivata, cosi' una
--- risposta "But you are a member of no group?!" relativa al PRIMO loot
--- (da solo) poteva chiudere anche il controllo del SECONDO loot (magari in
--- gruppo, o viceversa) — rischio concreto di split inviato/non inviato in
--- base a un controllo in realta' scaduto. Si accumula semplicemente
--- l'importo nel controllo gia' in corso: un solo controllo gruppo, un solo
--- split (con la somma totale) quando arriva la risposta.
--- Autosplit senza probe "group" (prima: a ogni cadavere/loot inviava group).
--- Split diretto sull'importo; se non sei in gruppo il MUD risponde da solo.
+-- Autosplit: split diretto; se siamo soli (_groupKnown=false) salta.
+-- Dopo un errore MUD "sei solo" memorizza e non ripete a ogni cadavere.
 function NebbieDash.startSplitFlow(amount)
-  if not amount then return end
-  if NebbieDash._groupCheckActive then
-    NebbieDash.finishSplitFlow(false)
+  if not amount or amount < 1 then return end
+  if NebbieDash.autoSplit == false then return end
+  if NebbieDash._groupKnown == false then
+    return
   end
+  local now = os.clock()
+  if NebbieDash._lastSplitAmount == amount
+      and NebbieDash._lastSplitAt
+      and (now - NebbieDash._lastSplitAt) < 1.2 then
+    return
+  end
+  NebbieDash._lastSplitAmount = amount
+  NebbieDash._lastSplitAt = now
   send("split " .. tostring(amount), false)
   cecho("<green>[NebbieDash] Split automatico: " .. amount .. " monete.\n")
 end
@@ -7094,21 +7137,30 @@ function NebbieDash.finishSplitFlow(grouped)
   local amount = NebbieDash._pendingSplitAmount
   NebbieDash._pendingSplitAmount = nil
   if grouped and amount then
+    NebbieDash._groupKnown = true
     send("split " .. tostring(amount), false)
     cecho("<green>[NebbieDash] Split automatico: " .. amount .. " monete.\n")
+  elseif grouped == false then
+    NebbieDash._groupKnown = false
   end
 end
 
 function NebbieDash.onGroupSoloLine()
-  if not NebbieDash._groupCheckActive then return end
   local text = line or (type(getCurrentLine) == "function" and getCurrentLine()) or ""
+  if NebbieDash.isGroupSoloLine(text) then
+    NebbieDash._groupKnown = false
+  end
+  if not NebbieDash._groupCheckActive then return end
   if not NebbieDash.isGroupSoloLine(text) then return end
   NebbieDash.finishSplitFlow(false)
 end
 
 function NebbieDash.onGroupHeaderLine()
-  if not NebbieDash._groupCheckActive then return end
   local text = line or (type(getCurrentLine) == "function" and getCurrentLine()) or ""
+  if NebbieDash.isGroupHeaderLine(text) then
+    NebbieDash._groupKnown = true
+  end
+  if not NebbieDash._groupCheckActive then return end
   if not NebbieDash.isGroupHeaderLine(text) then return end
   NebbieDash.finishSplitFlow(true)
 end
@@ -7117,14 +7169,19 @@ function NebbieDash.cmdSetAutoSplit(argStr)
   argStr = (argStr or ""):match("^%s*(.-)%s*$"):lower()
   if argStr == "on" then
     NebbieDash.autoSplit = true
+    NebbieDash._groupKnown = nil
   elseif argStr == "off" then
     NebbieDash.autoSplit = false
   else
     cecho("<orange>[NebbieDash] Uso: nautosplit <on|off> (attuale: " ..
-      (NebbieDash.autoSplit and "on" or "off") .. ")\n")
+      ((NebbieDash.autoSplit ~= false) and "on" or "off") .. ")\n")
     return
   end
-  cecho("<green>[NebbieDash] Split automatico dopo loot: " .. (NebbieDash.autoSplit and "on" or "off") .. ".\n")
+  NebbieDash.prefs = NebbieDash.prefs or {}
+  NebbieDash.prefs.auto_split = NebbieDash.autoSplit and true or false
+  NebbieDash.savePreferencesFile()
+  cecho("<green>[NebbieDash] Split automatico dopo loot: " ..
+    ((NebbieDash.autoSplit ~= false) and "on" or "off") .. " <grey>(salvato).\n")
 end
 
 function NebbieDash.cmdSplit(argStr)
@@ -8344,7 +8401,9 @@ function NebbieDash.teardownTriggers()
     NebbieDash._promptTrig, NebbieDash._promptImmTrig, NebbieDash._promptImmTrig2,
     NebbieDash._eqOpenTrig, NebbieDash._attribOpenTrig,
     NebbieDash._eqLineTrig, NebbieDash._attribLineTrig, NebbieDash._lootLineTrig,
-    NebbieDash._lootLineTrig2, NebbieDash._groupSoloTrig, NebbieDash._groupHeaderTrig, NebbieDash._combatEndTrig,
+    NebbieDash._lootLineTrig2, NebbieDash._groupSoloTrig, NebbieDash._groupHeaderTrig,
+    NebbieDash._splitSoloFailTrig, NebbieDash._splitSuccessTrig,
+    NebbieDash._combatEndTrig,
     NebbieDash._combatEndTrig2,
     NebbieDash._fallTrig, NebbieDash._disarmTrig, NebbieDash._hungerTrig, NebbieDash._thirstTrig,
     NebbieDash._wieldTrig, NebbieDash._identifyObjTrig, NebbieDash._identifyDmgTrig,
@@ -8397,7 +8456,13 @@ function NebbieDash.installTriggers()
   -- finche' non serve un controllo (dopo un loot riuscito).
   NebbieDash._lootLineTrig = tempTrigger("C'erano", [[NebbieDash.onLootLine()]])
   NebbieDash._lootLineTrig2 = tempTrigger("C'era una miserabile moneta", [[NebbieDash.onLootLine()]])
-  -- Trigger gruppo attivi solo durante startSplitFlow (vedi finishSplitFlow).
+  -- Memoria gruppo da risposta split (sempre attivi, costo trascurabile):
+  --   Ma cosa vuoi dividere che sei solo.
+  --   Hai diviso N monete...
+  NebbieDash._splitSoloFailTrig = tempTrigger("Ma cosa vuoi dividere che sei solo",
+    [[NebbieDash.onSplitSoloFailLine()]])
+  NebbieDash._splitSuccessTrig = tempTrigger("Hai diviso ", [[NebbieDash.onSplitSuccessLine()]])
+  -- Trigger gruppo attivi solo durante un eventuale controllo group legacy.
   -- Substring + validazione in handler (stripColors, pattern server reale):
   --   But you are a member of no group?!
   --   $c0015Your group "nome" consists of:
