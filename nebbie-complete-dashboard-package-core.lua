@@ -9,7 +9,7 @@
 -- docs/mudlet/analysis/RECOMMENDATION.md. Pattern prompt/eq basati su dati reali
 -- forniti dall'utente (docs/mudlet/analysis/Q&A.md, Round 3).
 
-local PKG_VER = "1.15.67"
+local PKG_VER = "1.15.69"
 local PKG_REPO = "wizardmorgan/nebbie-mudlet-dashboard"
 local PKG_FILE = "nebbie-complete-dashboard-package.mpackage"
 -- @main su jsDelivr puo' restare stale (osservato: restava 1.15.56 mentre tip
@@ -530,7 +530,13 @@ function NebbieDash.ensurePreferencesFile()
     "weapon_swap_delay = 0.5\n" ..
     "sanity_neq_on_login = on\n" ..
     "text_highlights = on\n" ..
-    "chat_window = on\n"
+    "chat_window = on\n" ..
+    "# ident_sync_url = https://tuo.vps/nebbie-ident\n" ..
+    "# ident_sync_token = <segreto>\n" ..
+    "# ident_sync_on_boot = off\n" ..
+    "ident_sync_url = \n" ..
+    "ident_sync_token = \n" ..
+    "ident_sync_on_boot = off\n"
   )
   f:close()
 end
@@ -548,6 +554,9 @@ function NebbieDash.loadPreferences()
     sanity_neq_on_login = true,
     text_highlights = true,
     chat_window = true,
+    ident_sync_url = "",
+    ident_sync_token = "",
+    ident_sync_on_boot = false,
   }
   local path = NebbieDash.preferencesPath()
   if type(io.exists) == "function" and io.exists(path) then
@@ -568,6 +577,12 @@ function NebbieDash.loadPreferences()
             NebbieDash.prefs.text_highlights = NebbieDash.parsePreferencesBool(val)
           elseif key == "chat_window" then
             NebbieDash.prefs.chat_window = NebbieDash.parsePreferencesBool(val)
+          elseif key == "ident_sync_url" then
+            NebbieDash.prefs.ident_sync_url = val:gsub("/+$", "")
+          elseif key == "ident_sync_token" then
+            NebbieDash.prefs.ident_sync_token = val
+          elseif key == "ident_sync_on_boot" then
+            NebbieDash.prefs.ident_sync_on_boot = NebbieDash.parsePreferencesBool(val)
           end
         end
       end
@@ -591,7 +606,10 @@ function NebbieDash.savePreferencesFile()
     "weapon_swap_delay = " .. tostring(NebbieDash.weaponSwapDelay or 0.5) .. "\n" ..
     "sanity_neq_on_login = " .. ((NebbieDash.prefs and NebbieDash.prefs.sanity_neq_on_login) and "on" or "off") .. "\n" ..
     "text_highlights = " .. ((NebbieDash.prefs and NebbieDash.prefs.text_highlights ~= false) and "on" or "off") .. "\n" ..
-    "chat_window = " .. ((NebbieDash.chatEnabled ~= false) and "on" or "off") .. "\n"
+    "chat_window = " .. ((NebbieDash.chatEnabled ~= false) and "on" or "off") .. "\n" ..
+    "ident_sync_url = " .. tostring((NebbieDash.prefs and NebbieDash.prefs.ident_sync_url) or "") .. "\n" ..
+    "ident_sync_token = " .. tostring((NebbieDash.prefs and NebbieDash.prefs.ident_sync_token) or "") .. "\n" ..
+    "ident_sync_on_boot = " .. ((NebbieDash.prefs and NebbieDash.prefs.ident_sync_on_boot) and "on" or "off") .. "\n"
   )
   f:close()
 end
@@ -1209,6 +1227,7 @@ NebbieDash.SHORTCUT_RESERVED = {
   nforgetspell = true, nbatch = true, nbatchreload = true, nbatchverify = true,
   nidentbatch = true, nidentbatchreload = true, nspellaliases = true, nspellaliasesreload = true,
   nidentdb = true, nidentdbreload = true,
+  nidentsync = true, nidentpull = true, nidentpush = true,
   nknowdb = true, nknowdbreload = true,
   npackageupdate = true,
   nchat = true,
@@ -3452,6 +3471,9 @@ NebbieDash.HELP_TEXT = {
   { "nidentui filter|char|del|reset", "Filtri / elimina / reset nella finestra Ident." },
   { "nidentdb export <NomePg>", "CSV di tutti gli identify di un PG (file NomePg-gg-mm-aaaa-hh-mm-ss.csv)." },
   { "nidentdbreload", "Ricarica nebbie-ident-db.lua dalla cartella condivisa." },
+  { "nidentsync", "Sync identify DB con hub VPS (pull+merge+push)." },
+  { "nidentpull / nidentpush", "Solo pull o solo push verso l'hub ident." },
+  { "nidentsync url|token|status", "Configura / mostra sync HTTPS (token in preferenze)." },
   { "nknowdb [query]", "Cerca nell'archivio know monster condiviso (profiles/ndashboard)." },
   { "nknowdb race <razza>", "Elenca mostri per razza (es. nknowdb race Goblinoid)." },
   { "nknowdbreload", "Ricarica nebbie-know-db.lua dalla cartella condivisa." },
@@ -5415,6 +5437,567 @@ function NebbieDash.cmdReloadIdentDb()
     tostring(NebbieDash.identDbEntryCount()) ..
     "<green> oggetti (<white>" .. NebbieDash.identDbPath() .. "<green>).\n")
 end
+
+
+-- ---------------------------------------------------------------------------
+-- Sync HTTPS archivio identify (hub VPS)
+--
+-- Mudlet getHTTP/postHTTP espongono il body solo se < ~10k caratteri: il pull
+-- e' quindi a pagine (/v1/ident?page=N). Il push manda tutto il DB locale e
+-- riceve un riepilogo compatto. Auth: Bearer token nelle preferenze.
+-- Comandi: nidentsync | nidentpull | nidentpush | nidentsync status|url|token
+-- ---------------------------------------------------------------------------
+NebbieDash.IDENT_SYNC_PAGE_SIZE = 5
+
+function NebbieDash.jsonEncode(value)
+  if type(yajl) == "table" and type(yajl.to_string) == "function" then
+    local ok, encoded = pcall(yajl.to_string, value)
+    if ok and type(encoded) == "string" then return encoded end
+  end
+  return NebbieDash.jsonEncodePure(value)
+end
+
+function NebbieDash.jsonDecode(text)
+  if type(text) ~= "string" then return nil end
+  if type(yajl) == "table" and type(yajl.to_value) == "function" then
+    local ok, decoded = pcall(yajl.to_value, text)
+    if ok then return decoded end
+  end
+  return NebbieDash.jsonDecodePure(text)
+end
+
+function NebbieDash.jsonEncodePure(value)
+  local t = type(value)
+  if value == nil then return "null" end
+  if t == "boolean" then return value and "true" or "false" end
+  if t == "number" then return tostring(value) end
+  if t == "string" then
+    local s = value
+      :gsub("\\", "\\\\")
+      :gsub('"', '\\"')
+      :gsub("\n", "\\n")
+      :gsub("\r", "\\r")
+      :gsub("\t", "\\t")
+    return '"' .. s .. '"'
+  end
+  if t ~= "table" then return "null" end
+  local isArray = true
+  local n = 0
+  for k, _ in pairs(value) do
+    n = n + 1
+    if type(k) ~= "number" or k < 1 or math.floor(k) ~= k then
+      isArray = false
+      break
+    end
+  end
+  if isArray then
+    for i = 1, n do
+      if value[i] == nil then isArray = false break end
+    end
+  end
+  if isArray then
+    local parts = {}
+    for i = 1, n do
+      parts[i] = NebbieDash.jsonEncodePure(value[i])
+    end
+    return "[" .. table.concat(parts, ",") .. "]"
+  end
+  local parts = {}
+  for k, v in pairs(value) do
+    if type(k) == "string" then
+      table.insert(parts, NebbieDash.jsonEncodePure(k) .. ":" .. NebbieDash.jsonEncodePure(v))
+    end
+  end
+  table.sort(parts)
+  return "{" .. table.concat(parts, ",") .. "}"
+end
+
+function NebbieDash.jsonDecodePure(text)
+  local i = 1
+  local function peek() return text:sub(i, i) end
+  local function get()
+    local c = text:sub(i, i)
+    i = i + 1
+    return c
+  end
+  local function skip()
+    while text:sub(i, i):match("%s") do i = i + 1 end
+  end
+  local parseValue
+  local function parseString()
+    if get() ~= '"' then return nil end
+    local out = {}
+    while true do
+      local c = get()
+      if c == "" then return nil end
+      if c == '"' then break end
+      if c == "\\" then
+        local e = get()
+        if e == "n" then table.insert(out, "\n")
+        elseif e == "r" then table.insert(out, "\r")
+        elseif e == "t" then table.insert(out, "\t")
+        elseif e == '"' or e == "\\" or e == "/" then table.insert(out, e)
+        elseif e == "u" then
+          local hex = text:sub(i, i + 3)
+          i = i + 4
+          local code = tonumber(hex, 16) or 32
+          if code < 128 then table.insert(out, string.char(code))
+          else table.insert(out, "?") end
+        else
+          table.insert(out, e)
+        end
+      else
+        table.insert(out, c)
+      end
+    end
+    return table.concat(out)
+  end
+  local function parseNumber()
+    local s, e = text:find("^-?%d+%.?%d*[eE]?[+-]?%d*", i)
+    if not s then return nil end
+    local n = tonumber(text:sub(s, e))
+    i = e + 1
+    return n
+  end
+  local function parseArray()
+    get() -- [
+    local arr = {}
+    skip()
+    if peek() == "]" then get() return arr end
+    while true do
+      local v = parseValue()
+      if v == nil and peek() ~= "n" then return nil end
+      table.insert(arr, v)
+      skip()
+      local c = get()
+      if c == "]" then break end
+      if c ~= "," then return nil end
+      skip()
+    end
+    return arr
+  end
+  local function parseObject()
+    get() -- {
+    local obj = {}
+    skip()
+    if peek() == "}" then get() return obj end
+    while true do
+      skip()
+      local key = parseString()
+      if not key then return nil end
+      skip()
+      if get() ~= ":" then return nil end
+      skip()
+      local val = parseValue()
+      obj[key] = val
+      skip()
+      local c = get()
+      if c == "}" then break end
+      if c ~= "," then return nil end
+    end
+    return obj
+  end
+  parseValue = function()
+    skip()
+    local c = peek()
+    if c == '"' then return parseString() end
+    if c == "{" then return parseObject() end
+    if c == "[" then return parseArray() end
+    if c == "t" and text:sub(i, i + 3) == "true" then i = i + 4 return true end
+    if c == "f" and text:sub(i, i + 4) == "false" then i = i + 5 return false end
+    if c == "n" and text:sub(i, i + 3) == "null" then i = i + 4 return nil end
+    if c == "-" or c:match("%d") then return parseNumber() end
+    return nil
+  end
+  local ok, val = pcall(parseValue)
+  if not ok then return nil end
+  return val
+end
+
+function NebbieDash.deepCopyTable(value)
+  if type(value) ~= "table" then return value end
+  local out = {}
+  for k, v in pairs(value) do
+    out[k] = NebbieDash.deepCopyTable(v)
+  end
+  return out
+end
+
+function NebbieDash.identEntryLastAt(entry)
+  if type(entry) ~= "table" then return 0 end
+  return tonumber(entry.lastAt) or 0
+end
+
+function NebbieDash.mergeIdentByCharacter(a, b)
+  local out = {}
+  if type(a) == "table" then
+    for who, info in pairs(a) do out[who] = NebbieDash.deepCopyTable(info) end
+  end
+  if type(b) == "table" then
+    for who, info in pairs(b) do
+      local cur = out[who]
+      if type(cur) ~= "table" then
+        out[who] = NebbieDash.deepCopyTable(info)
+      elseif type(info) == "table" then
+        if (tonumber(info.at) or 0) >= (tonumber(cur.at) or 0) then
+          out[who] = NebbieDash.deepCopyTable(info)
+        end
+      end
+    end
+  end
+  return out
+end
+
+-- Merge una entry remota nella locale. Ritorna "inserted"|"updated"|"unchanged".
+function NebbieDash.mergeIdentEntryLocal(existing, incoming)
+  if type(existing) ~= "table" then
+    return NebbieDash.deepCopyTable(incoming), "inserted"
+  end
+  if type(incoming) ~= "table" then
+    return existing, "unchanged"
+  end
+  local atEx = NebbieDash.identEntryLastAt(existing)
+  local atIn = NebbieDash.identEntryLastAt(incoming)
+  if atIn > atEx then
+    local merged = NebbieDash.deepCopyTable(incoming)
+    merged.byCharacter = NebbieDash.mergeIdentByCharacter(existing.byCharacter, incoming.byCharacter)
+    return merged, "updated"
+  end
+  local merged = NebbieDash.deepCopyTable(existing)
+  local before = NebbieDash.jsonEncodePure(existing.byCharacter or {})
+  merged.byCharacter = NebbieDash.mergeIdentByCharacter(existing.byCharacter, incoming.byCharacter)
+  local after = NebbieDash.jsonEncodePure(merged.byCharacter or {})
+  if atIn < atEx then
+    return merged, (before ~= after) and "updated" or "unchanged"
+  end
+  return merged, (before ~= after) and "updated" or "unchanged"
+end
+
+function NebbieDash.mergeIdentDbFromRemoteEntries(remoteEntries)
+  NebbieDash.identDb = NebbieDash.identDb or { entries = {} }
+  NebbieDash.identDb.entries = NebbieDash.identDb.entries or {}
+  local inserted, updated, unchanged = 0, 0, 0
+  if type(remoteEntries) ~= "table" then
+    return inserted, updated, unchanged
+  end
+  for key, remote in pairs(remoteEntries) do
+    if type(key) == "string" and key ~= "" and type(remote) == "table" then
+      local existing = NebbieDash.identDb.entries[key]
+      local merged, status = NebbieDash.mergeIdentEntryLocal(existing, remote)
+      if type(merged) == "table" then
+        merged.key = merged.key or key
+        NebbieDash.identDb.entries[key] = merged
+      end
+      if status == "inserted" then inserted = inserted + 1
+      elseif status == "updated" then updated = updated + 1
+      else unchanged = unchanged + 1 end
+    end
+  end
+  return inserted, updated, unchanged
+end
+
+function NebbieDash.identSyncConfigured()
+  local url = NebbieDash.prefs and NebbieDash.prefs.ident_sync_url or ""
+  local token = NebbieDash.prefs and NebbieDash.prefs.ident_sync_token or ""
+  url = (url or ""):match("^%s*(.-)%s*$") or ""
+  token = (token or ""):match("^%s*(.-)%s*$") or ""
+  if url == "" or token == "" then return false, url, token end
+  if not url:match("^https?://") then return false, url, token end
+  url = url:gsub("/+$", "")
+  return true, url, token
+end
+
+function NebbieDash.identSyncHeaders()
+  local ok, _, token = NebbieDash.identSyncConfigured()
+  if not ok then return nil end
+  return {
+    ["Authorization"] = "Bearer " .. token,
+    ["X-Nebbie-Token"] = token,
+    ["Accept"] = "application/json",
+    ["Content-Type"] = "application/json",
+  }
+end
+
+function NebbieDash.identSyncMaskUrl(url)
+  return (url or ""):gsub("://([^/@]+)@", "://***@")
+end
+
+function NebbieDash.identSyncBusy()
+  return NebbieDash._identSync and NebbieDash._identSync.active and true or false
+end
+
+function NebbieDash.identSyncAbort(msg)
+  if NebbieDash._identSync then NebbieDash._identSync.active = false end
+  if msg and msg ~= "" then
+    cecho("<orange>[NebbieDash] Ident sync: " .. msg .. "\n")
+  end
+end
+
+function NebbieDash.ensureIdentSyncHttpHandlers()
+  if NebbieDash._identSyncHttpHandlers then return end
+  if type(registerAnonymousEventHandler) ~= "function" then return end
+  registerAnonymousEventHandler("sysGetHttpDone", "NebbieDash.onIdentSyncGetDone")
+  registerAnonymousEventHandler("sysGetHttpError", "NebbieDash.onIdentSyncGetError")
+  registerAnonymousEventHandler("sysPostHttpDone", "NebbieDash.onIdentSyncPostDone")
+  registerAnonymousEventHandler("sysPostHttpError", "NebbieDash.onIdentSyncPostError")
+  NebbieDash._identSyncHttpHandlers = true
+end
+
+function NebbieDash.identSyncIsOurUrl(url)
+  local st = NebbieDash._identSync
+  if not st or not st.base then return false end
+  url = tostring(url or "")
+  return url:find(st.base, 1, true) ~= nil
+end
+
+function NebbieDash.startIdentSyncPull(mode)
+  local okCfg, base, _token = NebbieDash.identSyncConfigured()
+  if not okCfg then
+    cecho("<orange>[NebbieDash] Configura ident_sync_url e ident_sync_token "
+      .. "(preferenze o nidentsync url|token).\n")
+    return
+  end
+  if type(getHTTP) ~= "function" then
+    cecho("<orange>[NebbieDash] getHTTP non disponibile in questa Mudlet — aggiorna Mudlet.\n")
+    return
+  end
+  if NebbieDash.identSyncBusy() then
+    cecho("<orange>[NebbieDash] Ident sync gia' in corso.\n")
+    return
+  end
+  NebbieDash.ensureIdentSyncHttpHandlers()
+  NebbieDash._identSync = {
+    active = true,
+    mode = mode or "sync", -- sync|pull|push
+    base = base,
+    page = 1,
+    pages = nil,
+    pullInserted = 0,
+    pullUpdated = 0,
+    pullUnchanged = 0,
+  }
+  cecho("<grey>[NebbieDash] Ident sync: pull da <white>" ..
+    NebbieDash.identSyncMaskUrl(base) .. "<grey> ...\n")
+  NebbieDash.identSyncRequestPage(1)
+end
+
+function NebbieDash.identSyncRequestPage(page)
+  local st = NebbieDash._identSync
+  if not st or not st.active then return end
+  local url = string.format(
+    "%s/v1/ident?page=%d&page_size=%d",
+    st.base, page, NebbieDash.IDENT_SYNC_PAGE_SIZE or 5)
+  st.expectGetUrl = url
+  st.page = page
+  local headers = NebbieDash.identSyncHeaders()
+  local ok, err = pcall(getHTTP, url, headers)
+  if not ok then
+    NebbieDash.identSyncAbort("getHTTP fallita: " .. tostring(err))
+  end
+end
+
+function NebbieDash.onIdentSyncGetDone(_, url, body)
+  if not NebbieDash.identSyncIsOurUrl(url) then return end
+  local st = NebbieDash._identSync
+  if not st or not st.active then return end
+  if st.expectGetUrl and tostring(url) ~= tostring(st.expectGetUrl) then return end
+  local data = NebbieDash.jsonDecode(body or "")
+  if type(data) ~= "table" or data.ok ~= true then
+    NebbieDash.identSyncAbort("risposta pull non valida")
+    return
+  end
+  local ins, upd, unc = NebbieDash.mergeIdentDbFromRemoteEntries(data.entries or {})
+  st.pullInserted = (st.pullInserted or 0) + ins
+  st.pullUpdated = (st.pullUpdated or 0) + upd
+  st.pullUnchanged = (st.pullUnchanged or 0) + unc
+  st.pages = tonumber(data.pages) or st.page
+  local page = tonumber(data.page) or st.page
+  if page < (st.pages or page) then
+    NebbieDash.identSyncRequestPage(page + 1)
+    return
+  end
+  NebbieDash.scheduleIdentDbSave()
+  cecho(string.format(
+    "<green>[NebbieDash] Ident pull ok: +%d nuovi, %d aggiornati, %d invariati (pagine %d).\n",
+    st.pullInserted or 0, st.pullUpdated or 0, st.pullUnchanged or 0, st.pages or 1))
+  if st.mode == "pull" then
+    st.active = false
+    return
+  end
+  NebbieDash.identSyncStartPush()
+end
+
+function NebbieDash.onIdentSyncGetError(_, err, url)
+  if url and not NebbieDash.identSyncIsOurUrl(url) then return end
+  if not (NebbieDash._identSync and NebbieDash._identSync.active) then return end
+  NebbieDash.identSyncAbort("errore GET: " .. tostring(err))
+end
+
+function NebbieDash.identSyncStartPush()
+  local st = NebbieDash._identSync
+  if not st then return end
+  if type(postHTTP) ~= "function" then
+    NebbieDash.identSyncAbort("postHTTP non disponibile — pull fatto, push saltato")
+    return
+  end
+  local okCfg, base = NebbieDash.identSyncConfigured()
+  if not okCfg then
+    NebbieDash.identSyncAbort("config sync assente")
+    return
+  end
+  st.base = base
+  st.active = true
+  local url = base .. "/v1/ident/merge"
+  st.expectPostUrl = url
+  NebbieDash.identDb = NebbieDash.identDb or { entries = {} }
+  local payload = {
+    entries = NebbieDash.identDb.entries or {},
+  }
+  local body = NebbieDash.jsonEncode(payload)
+  if type(body) ~= "string" or body == "" then
+    NebbieDash.identSyncAbort("serializzazione JSON fallita")
+    return
+  end
+  cecho("<grey>[NebbieDash] Ident sync: push (" ..
+    tostring(NebbieDash.identDbEntryCount()) .. " oggetti)...\n")
+  local headers = NebbieDash.identSyncHeaders()
+  local ok, err = pcall(postHTTP, body, url, headers)
+  if not ok then
+    NebbieDash.identSyncAbort("postHTTP fallita: " .. tostring(err))
+  end
+end
+
+function NebbieDash.onIdentSyncPostDone(_, url, body)
+  if not NebbieDash.identSyncIsOurUrl(url) then return end
+  local st = NebbieDash._identSync
+  if not st or not st.active then return end
+  if st.expectPostUrl and tostring(url) ~= tostring(st.expectPostUrl) then return end
+  local data = NebbieDash.jsonDecode(body or "")
+  st.active = false
+  if type(data) ~= "table" or data.ok ~= true then
+    cecho("<orange>[NebbieDash] Ident push: risposta non valida.\n")
+    return
+  end
+  cecho(string.format(
+    "<green>[NebbieDash] Ident push ok: +%d / ~%d / =%d — totale hub %d.\n",
+    tonumber(data.inserted) or 0,
+    tonumber(data.updated) or 0,
+    tonumber(data.unchanged) or 0,
+    tonumber(data.total) or 0))
+  NebbieDash.prefs = NebbieDash.prefs or {}
+  NebbieDash.prefs.ident_sync_last_ok = os.time()
+  -- non riscriviamo il token in chiaro oltre al file preferenze gia' esistente
+end
+
+function NebbieDash.onIdentSyncPostError(_, err, url)
+  if url and not NebbieDash.identSyncIsOurUrl(url) then return end
+  if not (NebbieDash._identSync and NebbieDash._identSync.active) then return end
+  NebbieDash.identSyncAbort("errore POST: " .. tostring(err))
+end
+
+function NebbieDash.cmdIdentSync(argStr)
+  argStr = (argStr or ""):match("^%s*(.-)%s*$") or ""
+  local mode, rest = argStr:match("^(%S+)%s*(.-)%s*$")
+  mode = (mode or ""):lower()
+  rest = rest or ""
+  if mode == "" or mode == "sync" or mode == "full" then
+    NebbieDash.startIdentSyncPull("sync")
+    return
+  end
+  if mode == "pull" then
+    NebbieDash.startIdentSyncPull("pull")
+    return
+  end
+  if mode == "push" then
+    if NebbieDash.identSyncBusy() then
+      cecho("<orange>[NebbieDash] Ident sync gia' in corso.\n")
+      return
+    end
+    local okCfg = NebbieDash.identSyncConfigured()
+    if not okCfg then
+      cecho("<orange>[NebbieDash] Configura ident_sync_url e ident_sync_token.\n")
+      return
+    end
+    NebbieDash.ensureIdentSyncHttpHandlers()
+    local ok, base = NebbieDash.identSyncConfigured()
+    NebbieDash._identSync = { active = true, mode = "push", base = base }
+    NebbieDash.identSyncStartPush()
+    return
+  end
+  if mode == "status" or mode == "info" then
+    local ok, url = NebbieDash.identSyncConfigured()
+    cecho("<green>[NebbieDash] Ident sync URL: <white>" ..
+      (ok and NebbieDash.identSyncMaskUrl(url) or "(non configurato)") .. "\n")
+    cecho("<grey>Token: <white>" ..
+      ((NebbieDash.prefs and NebbieDash.prefs.ident_sync_token or "") ~= "" and "impostato" or "mancante") ..
+      "<grey> — on_boot: <white>" ..
+      ((NebbieDash.prefs and NebbieDash.prefs.ident_sync_on_boot) and "on" or "off") .. "\n")
+    if NebbieDash.identSyncBusy() then
+      cecho("<yellow>Stato: sync in corso.\n")
+    end
+    return
+  end
+  if mode == "url" then
+    if rest == "" then
+      cecho("<orange>[NebbieDash] Uso: nidentsync url <https://host[/prefisso]>\n")
+      return
+    end
+    rest = rest:gsub("/+$", "")
+    if not rest:match("^https?://") then
+      cecho("<orange>[NebbieDash] URL deve iniziare con http:// o https://\n")
+      return
+    end
+    NebbieDash.prefs = NebbieDash.prefs or {}
+    NebbieDash.prefs.ident_sync_url = rest
+    NebbieDash.savePreferencesFile()
+    cecho("<green>[NebbieDash] ident_sync_url salvato: <white>" ..
+      NebbieDash.identSyncMaskUrl(rest) .. "\n")
+    return
+  end
+  if mode == "token" then
+    if rest == "" then
+      cecho("<orange>[NebbieDash] Uso: nidentsync token <segreto>\n")
+      return
+    end
+    NebbieDash.prefs = NebbieDash.prefs or {}
+    NebbieDash.prefs.ident_sync_token = rest
+    NebbieDash.savePreferencesFile()
+    cecho("<green>[NebbieDash] ident_sync_token salvato (non mostrato).\n")
+    return
+  end
+  if mode == "onboot" or mode == "boot" then
+    local v = rest:lower()
+    if v ~= "on" and v ~= "off" then
+      cecho("<orange>[NebbieDash] Uso: nidentsync onboot <on|off>\n")
+      return
+    end
+    NebbieDash.prefs = NebbieDash.prefs or {}
+    NebbieDash.prefs.ident_sync_on_boot = (v == "on")
+    NebbieDash.savePreferencesFile()
+    cecho("<green>[NebbieDash] ident_sync_on_boot = " .. v .. "\n")
+    return
+  end
+  cecho("<orange>[NebbieDash] Uso: nidentsync [sync|pull|push|status|url …|token …|onboot on|off]\n")
+end
+
+function NebbieDash.cmdIdentPull()
+  NebbieDash.cmdIdentSync("pull")
+end
+
+function NebbieDash.cmdIdentPush()
+  NebbieDash.cmdIdentSync("push")
+end
+
+function NebbieDash.maybeIdentSyncOnBoot()
+  if not (NebbieDash.prefs and NebbieDash.prefs.ident_sync_on_boot) then return end
+  if not NebbieDash.identSyncConfigured() then return end
+  if type(tempTimer) ~= "function" then return end
+  tempTimer(2.5, function()
+    if NebbieDash.identSyncBusy() then return end
+    NebbieDash.startIdentSyncPull("sync")
+  end)
+end
+
 
 -- ---------------------------------------------------------------------------
 -- Archivio know monster (condiviso profiles/ndashboard) — stesso schema di
@@ -8527,6 +9110,7 @@ function NebbieDash.boot()
   NebbieDash.loadKnowDb()
   NebbieDash.loadUiStore()
   NebbieDash.loadPreferences()
+  NebbieDash.ensureIdentSyncHttpHandlers()
   NebbieDash.loadSoundsConfig()
   NebbieDash.prefs.sidebar_mode = "dock"
   NebbieDash.sidebarMode = "dock"
@@ -8537,6 +9121,7 @@ function NebbieDash.boot()
   NebbieDash.loadBatchCommands()
   NebbieDash.loadBatchItems()
   NebbieDash.installTriggers()
+  NebbieDash.maybeIdentSyncOnBoot()
   NebbieDash.purgeLegacyKeypadKeys(true)
   if NebbieDash._upgradeFromVer then
     NebbieDash.teardownGui()

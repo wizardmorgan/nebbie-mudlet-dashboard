@@ -24,6 +24,7 @@ Aggiornamenti successivi: **`npackageupdate`** in gioco.
 |------|--------|
 | `nebbie-complete-dashboard-package-core.lua` | Logica Lua (sorgente) |
 | `build-nebbie-complete-dashboard-package.py` | Genera `.mpackage` + XML di build |
+| `tools/ident-sync-server/` | Hub HTTPS identify DB (VPS; `nidentsync`) |
 | `analysis/` | Requisiti, changelog, USAGE |
 | `tests/` | Smoke test parsing e verify batch |
 

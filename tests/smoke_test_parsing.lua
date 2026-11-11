@@ -1519,6 +1519,63 @@ NebbieDash.onHighlightPerditaAura()
 check("highlight: text_highlights off non scrive RESANK", #_G.__hlEchoLog == 0)
 NebbieDash.textHighlights = true
 
+-- Ident sync HTTPS (1.15.69): JSON puro + merge lastAt / byCharacter
+local enc = NebbieDash.jsonEncodePure({
+  a = 1, b = "x", c = true, d = { nested = "y" }, e = { "i1", "i2" },
+})
+local dec = NebbieDash.jsonDecodePure(enc)
+check("identsync: jsonEncodePure/DecodePure roundtrip",
+  type(dec) == "table" and dec.a == 1 and dec.b == "x" and dec.c == true
+    and type(dec.d) == "table" and dec.d.nested == "y"
+    and type(dec.e) == "table" and dec.e[1] == "i1" and dec.e[2] == "i2")
+
+local older = {
+  key = "anello prova", objectName = "Anello Prova", lastAt = 10,
+  byCharacter = { Mirari = { at = 10 } },
+}
+local newer = {
+  key = "anello prova", objectName = "Anello Prova NEW", lastAt = 20,
+  byCharacter = { Sirio = { at = 20 } },
+}
+local m1, s1 = NebbieDash.mergeIdentEntryLocal(older, newer)
+check("identsync: merge newer wins", s1 == "updated" and m1.objectName == "Anello Prova NEW")
+check("identsync: merge unions byCharacter",
+  m1.byCharacter.Mirari and m1.byCharacter.Sirio)
+
+local m2, s2 = NebbieDash.mergeIdentEntryLocal(m1, {
+  key = "anello prova", objectName = "OLD", lastAt = 5,
+  byCharacter = { Gwyn = { at = 5 } },
+})
+check("identsync: older body unchanged", s2 == "updated" and m2.objectName == "Anello Prova NEW")
+check("identsync: older still unions byCharacter", m2.byCharacter.Gwyn ~= nil)
+
+NebbieDash.identDb = { entries = {} }
+local ins, upd = NebbieDash.mergeIdentDbFromRemoteEntries({
+  ["anello prova"] = newer,
+  ["mantello x"] = { key = "mantello x", objectName = "Mantello X", lastAt = 1 },
+})
+check("identsync: mergeDb inserts both", ins == 2 and NebbieDash.identDbEntryCount() == 2)
+local ins2, upd2 = NebbieDash.mergeIdentDbFromRemoteEntries({
+  ["anello prova"] = {
+    key = "anello prova", objectName = "Anello Prova NEWER", lastAt = 30,
+  },
+})
+check("identsync: mergeDb updates existing",
+  ins2 == 0 and upd2 == 1
+    and NebbieDash.identDb.entries["anello prova"].objectName == "Anello Prova NEWER")
+
+NebbieDash.prefs = NebbieDash.prefs or {}
+NebbieDash.prefs.ident_sync_url = ""
+NebbieDash.prefs.ident_sync_token = ""
+local cfgOk = NebbieDash.identSyncConfigured()
+check("identsync: non configurato senza url/token", cfgOk == false)
+NebbieDash.prefs.ident_sync_url = "https://example.test/nebbie-ident/"
+NebbieDash.prefs.ident_sync_token = "secret"
+cfgOk = select(1, NebbieDash.identSyncConfigured())
+local cfgUrl = select(2, NebbieDash.identSyncConfigured())
+check("identsync: configurato con https", cfgOk == true)
+check("identsync: strip slash finale URL", cfgUrl == "https://example.test/nebbie-ident")
+
 -- Archivio know monster (v1.15.55): parser + upsert + merge + capture
 local knowLinesFull = {
   "Un goblin e' di razza Goblinoid.",

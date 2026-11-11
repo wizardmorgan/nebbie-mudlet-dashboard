@@ -113,7 +113,9 @@ profilo Mudlet, più personaggi, cambio automatico rilevato dal prompt).
   creati al primo avvio; migrazione da profilo singolo o da `~/NebbieDash`.
 - **Archivio identify** (`nidentdb`): salva in tempo reale ogni identify
   (spell/pergamena) in `nebbie-ident-db.lua` condiviso; cerca per nome e
-  incrocia con l’equip in cache (`nidentdb where`).
+  incrocia con l’equip in cache (`nidentdb where`). Sync multi-PC via hub
+  HTTPS sul VPS: `nidentsync` / `nidentpull` / `nidentpush`
+  (`tools/ident-sync-server/`).
 - **Archivio know monster** (`nknowdb`): salva il blocco di `cast 'know monster'`
   in `nebbie-know-db.lua` condiviso; cerca per nome/razza/hate/susc.
 - **Evidenziazioni testo**: gemme/metalli + aura/disarm/sanc/dig/`<impugnato>`
@@ -209,6 +211,10 @@ ALIASES = [
     ("nebbie-dash-ident-db", "^nidentdb$", "NebbieDash.cmdIdentDb(\"\")"),
     ("nebbie-dash-ident-db-args", "^nidentdb (.+)$", "NebbieDash.cmdIdentDb(matches[2])"),
     ("nebbie-dash-ident-db-reload", "^nidentdbreload$", "NebbieDash.cmdReloadIdentDb()"),
+    ("nebbie-dash-ident-sync", "^nidentsync$", "NebbieDash.cmdIdentSync(\"\")"),
+    ("nebbie-dash-ident-sync-args", "^nidentsync (.+)$", "NebbieDash.cmdIdentSync(matches[2])"),
+    ("nebbie-dash-ident-pull", "^nidentpull$", "NebbieDash.cmdIdentPull()"),
+    ("nebbie-dash-ident-push", "^nidentpush$", "NebbieDash.cmdIdentPush()"),
     ("nebbie-dash-ident-ui", "^nidentui$", "NebbieDash.cmdIdentUi(\"\")"),
     ("nebbie-dash-ident-ui-args", "^nidentui (.+)$", "NebbieDash.cmdIdentUi(matches[2])"),
     ("nebbie-dash-know-db", "^nknowdb$", "NebbieDash.cmdKnowDb(\"\")"),

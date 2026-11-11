@@ -1,5 +1,15 @@
 # CHANGELOG — nebbie-complete-dashboard-package
 
+## 1.15.69 — 2026-11-11
+
+- **Ident sync HTTPS (multi-PC)**: hub Python su VPS
+  (`tools/ident-sync-server/`) + comandi Mudlet `nidentsync` /
+  `nidentpull` / `nidentpush`. Preferenze `ident_sync_url`,
+  `ident_sync_token`, `ident_sync_on_boot`. Pull a pagine (limite Mudlet
+  ~10k sul body GET); merge per chiave con `lastAt` più recente; push con
+  riepilogo compatto. Pensato per casa/Tailscale/ufficio+stunnel sullo
+  stesso VPS.
+
 ## 1.15.67 — 2026-11-09
 
 - **nidentui**: testo guida senza `&lt;…&gt;` (cecho li mostrava letterali);

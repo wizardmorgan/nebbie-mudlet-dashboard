@@ -95,6 +95,9 @@ Nessun alias invia comandi al MUD in automatico all'avvio (scelta deliberata, ve
 | `nidentdb hold <oggetto> <NomePg>` | Assegna possesso senza drop pendente. |
 | `nidentdbreload` | Ricarica l’archivio identify dal disco. |
 | `nidentdb export <NomePg>` | Esporta in CSV tutti gli identify di quel PG (`NomePg-gg-mm-aaaa-hh-mm-ss.csv`). |
+| `nidentsync` | Sync bidirezionale del DB identify con l’hub HTTPS sul VPS (pull a pagine + merge + push). |
+| `nidentpull` / `nidentpush` | Solo scarica/merge dall’hub, oppure solo invia il DB locale. |
+| `nidentsync url\|token\|status\|onboot` | Configura URL/token, stato, sync automatico al boot. |
 | `nknowdb [query]` | Cerca nell’archivio **know monster** condiviso (`nebbie-know-db.lua`). |
 | `nknowdb race <razza>` | Filtra per razza. |
 | `nknowdbreload` | Ricarica l’archivio know monster dal disco. |
@@ -148,6 +151,25 @@ con suffisso `#2`, `#3`, …; stesso nome **e** stesse stats → aggiorna l’en
 `cedibile`. Con identify che ha `PROCAREA-REWARD` il flag si attiva da solo; altrimenti
 `nidentdb cedibile <oggetto>` / `nidentdb noncedibile <oggetto>`. Il match sul nome è stretto
 (un “Anello dei nani” non deve più agganciare un “anello varco…” in archivio).
+
+### Sync multi-PC (hub VPS HTTPS)
+
+Il file locale resta la copia di lavoro. Per allineare PC diversi (casa, Tailscale,
+ufficio via stunnel) usa un hub sul VPS: vedi `tools/ident-sync-server/README.md`.
+
+```
+nidentsync url https://tuo.vps/nebbie-ident
+nidentsync token <segreto-lungo>
+nidentsync          # pull a pagine + merge + push
+nidentpull          # solo scarica
+nidentpush          # solo invia
+nidentsync status
+nidentsync onboot on|off
+```
+
+Preferenze equivalenti in `nebbie-dash-preferences.txt`: `ident_sync_url`,
+`ident_sync_token`, `ident_sync_on_boot`. Il merge tiene l’entry con `lastAt` più
+recente e unisce `byCharacter`. Serve Mudlet con `getHTTP`/`postHTTP`.
 
 `where` mostra anche il possesso tracciato e l’incrocio con la cache equip (serve aver fatto
 `nresync`/`neq` sui PG rilevanti).
