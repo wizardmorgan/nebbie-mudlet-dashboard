@@ -78,7 +78,7 @@ Nessun alias invia comandi al MUD in automatico all'avvio (scelta deliberata, ve
 | `nspeedwalks` | Ricarica gli speedwalk dal file di configurazione dopo averlo modificato (vedi sotto), senza riavviare Mudlet. |
 | `nspeeddelay <secondi>` | Pausa tra un movimento e il successivo quando esegui uno speedwalk (default 0.35s). |
 | `nhelp` | Mostra/nasconde la finestra con l'elenco di tutti questi comandi (stessa finestra del tasto "? Comandi", vedi sotto). |
-| `nloot` | Prende le monete dal cadavere presente (prova sia `get all.coin corp` che `get all.coin pile`, per cadaveri normali e "pile of bones"). Normalmente non serve digitarlo: scatta da solo, vedi sotto. |
+| `nloot` | Prende le monete dai cadaveri (`get all.coin N.corpo` / `N.pile`, anche multipli / corpo in inventario). Normalmente scatta da solo a fine fight. |
 | `nautoloot <on\|off>` | Attiva/disattiva il loot automatico alla fine di ogni combattimento a cui partecipi (default **on**). |
 | `nautosplit <on\|off>` | Attiva/disattiva lo split automatico col gruppo dopo ogni loot riuscito (default **on**). |
 | `nsplit <numero>` | Divide manualmente un importo col gruppo (equivalente a digitare `split <numero>`), utile per casi non coperti da `nloot`. |
@@ -192,6 +192,7 @@ Dalla **1.15.63** una finestra floating raccoglie i canali di comunicazione:
 |--------|------------------|
 | say | `say` / `'` |
 | gtell | `gt` / `gtell` |
+| clantell | `clantell` / canale clan-casata (`dice al clan` / `dice alla casata`) |
 | tell | `tell` |
 | whisper | `whisper` |
 | ask | `ask` |

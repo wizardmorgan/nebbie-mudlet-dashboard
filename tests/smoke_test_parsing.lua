@@ -14,7 +14,11 @@ function tempRegexTrigger() return nil end
 function disableTrigger() end
 function enableTrigger() end
 function killTrigger() end
-function killTimer() end
+function killTimer()
+  -- In Mudlet cancella il timer; nel mock svuota la coda dei delay medi
+  -- cosi' scheduleAutoLoot puo' riprogrammare il coalescing.
+  _G.__pendingShortTimers = {}
+end
 function selectString() return true end
 function setFgColor() end
 function setBgColor() end
@@ -28,14 +32,30 @@ function killTimer() end
 local lastSent = nil
 local sentLog = {}
 function send(cmd) lastSent = cmd; table.insert(sentLog, cmd) end
--- Delay brevi (debounce fame 0.1, swap arma, save ident): esegui subito.
--- Watchdog lunghi (eq/attrib/ident capture, tipicamente 3–4s): no-op, altrimenti
--- chiudono la cattura prima che il test possa alimentare le righe.
+-- Delay brevi (fame/swap/save): esegui subito.
+-- Delay medi (autoloot 0.35s): accoda e flush esplicito (simula coalescing).
+-- Watchdog lunghi (eq/attrib/ident, tipicamente 3–4s): no-op.
+_G.__pendingShortTimers = {}
 function tempTimer(delay, arg)
   delay = tonumber(delay) or 0
   if delay > 1 then return 1 end
+  if delay >= 0.3 and type(arg) == "function" then
+    table.insert(_G.__pendingShortTimers, arg)
+    return 1
+  end
   if type(arg) == "function" then arg() end
   return 1
+end
+function flushPendingShortTimers()
+  -- Drain a ondate: cmdLoot accoda corpo/pile a delay medi.
+  for _ = 1, 20 do
+    local q = _G.__pendingShortTimers
+    if not q or #q == 0 then break end
+    _G.__pendingShortTimers = {}
+    for _, fn in ipairs(q) do
+      if type(fn) == "function" then fn() end
+    end
+  end
 end
 function setBorderRight() end
 function setBorderLeft() end
@@ -471,29 +491,50 @@ check("combattimento: riga 'is dead!' da sola non genera comandi", #sentLog == 0
 line = "La tua parte di esperienza e' di 1047 punti."
 NebbieDash._lastAutoLootClock = nil
 NebbieDash._lootFlowActive = false
+NebbieDash._pendingLootCorpses = nil
+_G.__pendingShortTimers = {}
 NebbieDash.onCombatEndLine()
-check("combattimento: fine combattimento avvia il loot automatico", sentLog[1] == "get all.coin corp")
+flushPendingShortTimers()
+local has1corpo = false
+for _, s in ipairs(sentLog) do
+  if s == "get all.coin 1.corpo" then has1corpo = true end
+end
+check("combattimento: fine combattimento avvia loot 1.corpo", has1corpo)
 
 sentLog = {}
-NebbieDash._lastAutoLootClock = nil
 NebbieDash._lootFlowActive = false
+NebbieDash._pendingLootCorpses = nil
+_G.__pendingShortTimers = {}
 line = "La tua parte di esperienza e' di 1047 punti."
 for _ = 1, 3 do NebbieDash.onCombatEndLine() end
--- Debounce 0.6s: un solo cmdLoot. In Mudlet il pile e' ritardato 0.5s; nel mock
--- sync tempTimer esegue anche il pile → 2 send (corp+pile) da un solo flusso.
-local corpCount = 0
+-- Tre exp ravvicinate: un solo timer finale con pending=3 → sweep 1..3.
+check("combattimento: 3 exp coalescing -> pending 3", NebbieDash._pendingLootCorpses == 3)
+flushPendingShortTimers()
+local corp1Count = 0
+local corp3 = false
 for _, s in ipairs(sentLog) do
-  if s == "get all.coin corp" then corpCount = corpCount + 1 end
+  if s == "get all.coin 1.corpo" then corp1Count = corp1Count + 1 end
+  if s == "get all.coin 3.corpo" then corp3 = true end
 end
-check("combattimento: piu' trigger sulla stessa exp -> un solo get corp", corpCount == 1)
+check("combattimento: piu' trigger stessa exp -> un solo flusso 1.corpo", corp1Count == 1)
+check("combattimento: 3 exp coalescing -> sweep fino a 3.corpo", corp3 == true)
 
 -- Anche con 0 punti di esperienza (uccisione minima) deve comunque scattare.
 sentLog = {}
 line = "La tua parte di esperienza e' di 0 punti."
-NebbieDash._lastAutoLootClock = nil
 NebbieDash._lootFlowActive = false
+NebbieDash._pendingLootCorpses = nil
+_G.__pendingShortTimers = {}
 NebbieDash.onCombatEndLine()
-check("combattimento: scatta anche con 0 punti esperienza", sentLog[1] == "get all.coin corp")
+flushPendingShortTimers()
+has1corpo = false
+for _, s in ipairs(sentLog) do
+  if s == "get all.coin 1.corpo" then has1corpo = true end
+end
+check("combattimento: scatta anche con 0 punti esperienza", has1corpo)
+
+check("combattimento: exp senza 'punti' riconosciuta",
+  NebbieDash.isCombatExpLine("La tua parte di esperienza e' di 42."))
 
 -- Con nautoloot off non deve inviare nulla.
 NebbieDash.autoLoot = false
@@ -956,12 +997,18 @@ check("split: nessun pending group check", NebbieDash._groupCheckActive == false
 -- questa frase (solo con "La tua parte di esperienza e' di N punti.").
 NebbieDash.autoLoot = true
 sentLog = {}
-NebbieDash._lastAutoLootClock = nil
 NebbieDash._lootFlowActive = false
+NebbieDash._pendingLootCorpses = nil
+_G.__pendingShortTimers = {}
 line = "La tua esperienza e' aumentata di 225000 punti."
 NebbieDash.onCombatEndLine()
+flushPendingShortTimers()
+local soloHasCorpo = false
+for _, s in ipairs(sentLog) do
+  if s == "get all.coin 1.corpo" then soloHasCorpo = true end
+end
 check("combattimento (solitaria): 'La tua esperienza e' aumentata di' avvia il loot automatico",
-  sentLog[1] == "get all.coin corp")
+  soloHasCorpo)
 
 -- Test 22: nforgetspell — richiesto esplicitamente dopo che l'utente ha
 -- segnalato spell non appartenenti al personaggio attivo rimaste visibili
@@ -1662,6 +1709,10 @@ chatOk("chat: say self", "Tu dici 'ciao a tutti'", "say", "Tu", "ciao a tutti")
 chatOk("chat: say other", "[Mirari] dice 'pronti'", "say", "Mirari", "pronti")
 chatOk("chat: gtell self", "Tu dici al gruppo 'tankate'", "gtell", "Tu", "tankate")
 chatOk("chat: gtell other", "[Sirio] dice al gruppo 'ok'", "gtell", "Sirio", "ok")
+chatOk("chat: clantell self", "Tu dici al clan 'riunione'", "clantell", "Tu", "riunione")
+chatOk("chat: clantell other", "[Mirari] dice al clan 'arrivo'", "clantell", "Mirari", "arrivo")
+chatOk("chat: casata self", "Tu dici alla casata 'tributo'", "clantell", "Tu", "tributo")
+chatOk("chat: casata other", "[Sirio] dice alla casata 'ok'", "clantell", "Sirio", "ok")
 chatOk("chat: gossip other", "[Hayato] vi dice 'zone libera'", "gossip", "Hayato", "zone libera")
 chatOk("chat: tell self", "Tu dici a Mirari 'qui'", "tell", "Tu", "qui", "Mirari")
 chatOk("chat: tell AFK", "Tu dici a Bob (che e' AFK) 'ping'", "tell", "Tu", "ping", "Bob")

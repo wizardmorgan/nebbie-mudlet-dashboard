@@ -1,5 +1,15 @@
 # CHANGELOG — nebbie-complete-dashboard-package
 
+## 1.15.70 — 2026-11-12
+
+- **Autoloot monete**: spazzola `1.corpo`…`N.corpo` e `1.pile`…`N.pile`
+  (prima `get all.coin corp` colpiva sempre il primo match: corpo in
+  inventario o cadavere già vuoto, saltando gli altri). Conta le exp di
+  kill ravvicinate (AOE) per N; minimo 2 tentativi. Riconosce anche
+  `La tua parte di esperienza e' di N.` (senza “punti”).
+- **nchat**: logga anche clantell/casata (`Tu dici al clan/casata '…'`,
+  `[Nome] dice al clan/casata '…'`).
+
 ## 1.15.67 — 2026-11-09
 
 - **nidentui**: testo guida senza `&lt;…&gt;` (cecho li mostrava letterali);

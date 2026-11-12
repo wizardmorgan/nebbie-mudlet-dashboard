@@ -9,7 +9,7 @@
 -- docs/mudlet/analysis/RECOMMENDATION.md. Pattern prompt/eq basati su dati reali
 -- forniti dall'utente (docs/mudlet/analysis/Q&A.md, Round 3).
 
-local PKG_VER = "1.15.67"
+local PKG_VER = "1.15.70"
 local PKG_REPO = "wizardmorgan/nebbie-mudlet-dashboard"
 local PKG_FILE = "nebbie-complete-dashboard-package.mpackage"
 -- @main su jsDelivr puo' restare stale (osservato: restava 1.15.56 mentre tip
@@ -2185,6 +2185,7 @@ NebbieDash.CHAT_CHANNEL_COLORS = {
   say = "white",
   gossip = "yellow",
   gtell = "cyan",
+  clantell = "orange",
   tell = "magenta",
   whisper = "green",
   ask = "blue",
@@ -2302,7 +2303,7 @@ function NebbieDash.initChatWindow()
   NebbieDash._chatCreated = true
   NebbieDash._chatHidden = false
   NebbieDash.chatConsoleCecho(
-    "<grey>Canali: say · gt · tell · whisper · ask · gossip · shout\n"
+    "<grey>Canali: say · gt · clan · tell · whisper · ask · gossip · shout\n"
       .. "Comandi: <yellow>nchat<grey> (toggle) · <yellow>nchat clear<grey> · <yellow>nchat off\n")
 end
 
@@ -2314,6 +2315,16 @@ function NebbieDash.parseChatLine(text)
   local msg = text:match("^Tu dici al gruppo '(.+)'%s*$")
   if msg then
     return { channel = "gtell", speaker = "Tu", message = msg, self = true }
+  end
+
+  -- Clantell / casata (parallelo a gtell; formati tipici IT se il canale e' attivo).
+  msg = text:match("^Tu dici al clan '(.+)'%s*$")
+  if msg then
+    return { channel = "clantell", speaker = "Tu", message = msg, self = true }
+  end
+  msg = text:match("^Tu dici alla casata '(.+)'%s*$")
+  if msg then
+    return { channel = "clantell", speaker = "Tu", message = msg, self = true }
   end
 
   local target
@@ -2351,6 +2362,14 @@ function NebbieDash.parseChatLine(text)
   who, msg = text:match("^%[(.-)%] dice al gruppo '(.+)'%s*$")
   if who and msg then
     return { channel = "gtell", speaker = who, message = msg }
+  end
+  who, msg = text:match("^%[(.-)%] dice al clan '(.+)'%s*$")
+  if who and msg then
+    return { channel = "clantell", speaker = who, message = msg }
+  end
+  who, msg = text:match("^%[(.-)%] dice alla casata '(.+)'%s*$")
+  if who and msg then
+    return { channel = "clantell", speaker = who, message = msg }
   end
   who, msg = text:match("^%[(.-)%] vi dice '(.+)'%s*$")
   if who and msg then
@@ -2423,12 +2442,16 @@ function NebbieDash.installChatTriggers()
   if type(tempTrigger) ~= "function" then return end
   local patterns = {
     "Tu dici al gruppo '",
+    "Tu dici al clan '",
+    "Tu dici alla casata '",
     "Tu dici a ",
     "Tu sussurri a ",
     "Tu chiedi a ",
     "Tu gridi '",
     "Tu dici '",
     "] dice al gruppo '",
+    "] dice al clan '",
+    "] dice alla casata '",
     "] vi dice '",
     "] ti dice '",
     "] ti sussurra '",
@@ -2496,7 +2519,7 @@ function NebbieDash.cmdChat(argStr)
     return
   end
   cecho("<orange>[NebbieDash] Uso: <yellow>nchat<orange> | <yellow>nchat on|off|clear\n")
-  cecho("<grey>Raccoglie: say, gt/gtell, tell, whisper, ask, gossip, shout.\n")
+  cecho("<grey>Raccoglie: say, gt/gtell, clantell/casata, tell, whisper, ask, gossip, shout.\n")
 end
 
 -- ---------------------------------------------------------------------------
@@ -3455,7 +3478,7 @@ NebbieDash.HELP_TEXT = {
   { "nknowdb [query]", "Cerca nell'archivio know monster condiviso (profiles/ndashboard)." },
   { "nknowdb race <razza>", "Elenca mostri per razza (es. nknowdb race Goblinoid)." },
   { "nknowdbreload", "Ricarica nebbie-know-db.lua dalla cartella condivisa." },
-  { "nchat", "Mostra/nascondi la finestra floating chat (say/gt/tell/whisper/ask/gossip/shout)." },
+  { "nchat", "Mostra/nascondi la finestra floating chat (say/gt/clan/tell/whisper/ask/gossip/shout)." },
   { "nchat on|off|clear", "Attiva/disattiva o svuota la finestra chat." },
   { "identify <arma>", "(comando di gioco) Rileva il tipo di danno (slash/blunt/pierce) per usa/disarmo." },
   { "nhelp", "Mostra/nascondi questa finestra." },
@@ -3924,44 +3947,38 @@ function NebbieDash.isGroupHeaderLine(text)
   return text:match("^Your group .-consists of:") ~= nil
 end
 
--- Solo le due righe di fine combattimento reali (non "La tua parte e' di N monete"
--- dello split altrui, achievement, ecc.).
+-- Fine combattimento (fight.cpp). Variante senza "punti" esiste per alcuni
+-- follower NPC. Non usare "La tua parte e' di N monete." (messaggio split).
 function NebbieDash.isCombatExpLine(text)
   text = NebbieDash.stripColors(text or ""):match("^%s*(.-)%s*$") or ""
   if text:match("^La tua parte di esperienza e' di %d+ punti%.%s*$") then return true end
+  if text:match("^La tua parte di esperienza e' di %d+%.%s*$") then return true end
   if text:match("^La tua esperienza e' aumentata di %d+ punti%.%s*$") then return true end
   return false
 end
 
--- Segnale di fine combattimento: due formati REALI confermati dall'utente —
--- "La tua parte di esperienza e' di N punti." (quota di gruppo) e "La tua
--- esperienza e' aumentata di N punti." (uccisione in solitaria, testo
--- fornito il 2026-08-10 con "Gwynyar is dead!"/"A mindflayer is dead!" ecc.
--- — senza questo secondo shield l'autoloot non scattava affatto per le
--- uccisioni in solitaria con questa frase). Entrambi sempre attivi (stesso
--- principio degli altri trigger a riga singola). Fanno scattare `nloot` da
--- solo se `nautoloot` e' attivo, cosi' non serve piu' digitarlo manualmente
--- dopo ogni uccisione.
+-- Segnale di fine combattimento → nloot se nautoloot on. Ogni riga exp
+-- incrementa il conteggio cadaveri da spazzolare (AOE / multi-kill).
 function NebbieDash.onCombatEndLine()
-  if not NebbieDash.autoLoot then return end
+  if NebbieDash.autoLoot == false then return end
   local text = line or (type(getCurrentLine) == "function" and getCurrentLine()) or ""
   if not NebbieDash.isCombatExpLine(text) then return end
   NebbieDash.scheduleAutoLoot()
 end
 
 function NebbieDash.scheduleAutoLoot()
-  local now = os.clock()
-  if NebbieDash._lastAutoLootClock and (now - NebbieDash._lastAutoLootClock) < 0.6 then
-    return
-  end
-  NebbieDash._lastAutoLootClock = now
+  if NebbieDash.autoLoot == false then return end
+  -- Conta le uccisioni ravvicinate: un solo flusso loot spazzola 1..N cadaveri.
+  NebbieDash._pendingLootCorpses = math.min(
+    NebbieDash.LOOT_MAX_CORPSES or 6,
+    (NebbieDash._pendingLootCorpses or 0) + 1)
   if NebbieDash._autoLootDelayTimer and type(killTimer) == "function" then
     pcall(killTimer, NebbieDash._autoLootDelayTimer)
   end
-  -- Breve attesa: il cadavere compare spesso un attimo dopo la riga exp; evita
-  -- get a vuoto e riduce i doppi invii se piu' trigger scattano sulla stessa riga.
+  -- Riprogramma sempre: cosi' N kill in 0.35s → un solo cmdLoot con N corretto.
   NebbieDash._autoLootDelayTimer = tempTimer(0.35, function()
     NebbieDash._autoLootDelayTimer = nil
+    if NebbieDash.autoLoot == false then return end
     NebbieDash.cmdLoot()
   end)
 end
@@ -7026,28 +7043,67 @@ function NebbieDash.onLootLine()
   end
 end
 
--- Invia i due comandi di loot noti (cadavere normale + pile of bones): solo
--- uno dei due potra' avere successo per singolo cadavere, l'altro risponde
--- con un semplice "Non vedi nessun ..." innocuo che non fa scattare nulla.
-function NebbieDash.cmdLoot()
-  if NebbieDash._lootFlowActive then return end
+-- Loot monete da cadaveri: keyword server = "corpo <nome>" (fight.cpp) oppure
+-- "dust pile bones" per non-morti. get_obj_vis_accessible cerca PRIMA
+-- l'inventario: se hai un corpo in mano, "get all.coin corpo" colpisce quello
+-- e salta il cadavere a terra. Inoltre con piu' cadaveri in stanza (AOE)
+-- bisogna usare 1.corpo, 2.corpo, … — altrimenti resta sempre sul primo.
+NebbieDash.LOOT_MAX_CORPSES = 6
+
+function NebbieDash.cmdLoot(forceAttempts)
+  local now = os.clock()
+  if NebbieDash._lootFlowActive then
+    local started = NebbieDash._lootFlowStartedAt or 0
+    if (now - started) < 2.5 then
+      -- Un altro kill e' arrivato durante lo sweep: ripeti a fine flusso.
+      NebbieDash._lootFlowQueued = true
+      NebbieDash._pendingLootCorpses = math.min(
+        NebbieDash.LOOT_MAX_CORPSES or 6,
+        math.max(NebbieDash._pendingLootCorpses or 1, 2))
+      return
+    end
+    NebbieDash._lootFlowActive = false
+  end
+  local attempts = tonumber(forceAttempts)
+  if not attempts or attempts < 1 then
+    attempts = NebbieDash._pendingLootCorpses or 1
+  end
+  -- Almeno 2: copre corpo in inventario + cadavere a terra.
+  if attempts < 2 then attempts = 2 end
+  if attempts > (NebbieDash.LOOT_MAX_CORPSES or 6) then
+    attempts = NebbieDash.LOOT_MAX_CORPSES or 6
+  end
+  NebbieDash._pendingLootCorpses = 0
   NebbieDash._lootFlowActive = true
+  NebbieDash._lootFlowStartedAt = now
   NebbieDash._lootFlowGen = (NebbieDash._lootFlowGen or 0) + 1
   local gen = NebbieDash._lootFlowGen
   if NebbieDash._lootPileTimer and type(killTimer) == "function" then
     pcall(killTimer, NebbieDash._lootPileTimer)
     NebbieDash._lootPileTimer = nil
   end
-  send("get all.coin corp", false)
-  NebbieDash._lootPileTimer = tempTimer(0.5, function()
-    if NebbieDash._lootFlowGen ~= gen then return end
-    NebbieDash._lootPileTimer = nil
-    send("get all.coin pile", false)
-    tempTimer(0.15, function()
-      if NebbieDash._lootFlowGen == gen then
-        NebbieDash._lootFlowActive = false
-      end
+  local delay = 0
+  for i = 1, attempts do
+    local prefix = tostring(i) .. "."
+    local dCorpo = delay
+    local dPile = delay + 0.15
+    tempTimer(dCorpo, function()
+      if NebbieDash._lootFlowGen ~= gen then return end
+      send("get all.coin " .. prefix .. "corpo", false)
     end)
+    tempTimer(dPile, function()
+      if NebbieDash._lootFlowGen ~= gen then return end
+      send("get all.coin " .. prefix .. "pile", false)
+    end)
+    delay = delay + 0.35
+  end
+  tempTimer(delay + 0.25, function()
+    if NebbieDash._lootFlowGen ~= gen then return end
+    NebbieDash._lootFlowActive = false
+    if NebbieDash._lootFlowQueued then
+      NebbieDash._lootFlowQueued = false
+      NebbieDash.cmdLoot()
+    end
   end)
 end
 
