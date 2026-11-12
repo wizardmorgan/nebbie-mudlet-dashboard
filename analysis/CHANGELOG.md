@@ -1,5 +1,14 @@
 # CHANGELOG — nebbie-complete-dashboard-package
 
+## 1.15.71 — 2026-11-12
+
+- **Allarme monete sottratte** (`ngoldalert`): monitora `G:` sul prompt e
+  avvisa se scende senza un’azione volontaria. Il furto riuscito è
+  silenzioso per la vittima — l’unico segnale affidabile è il prompt.
+  Ignora split / give coin / drop coin / pagamenti shop-asta (comando inviato
+  o echo `Hai diviso` / `Dai … monete` / `Posi … monete` / `Paghi`). Preferenza
+  `gold_alert`; suono opzionale `gold_loss=` in `nebbie-dash-sounds.txt`.
+
 ## 1.15.67 — 2026-11-09
 
 - **nidentui**: testo guida senza `&lt;…&gt;` (cecho li mostrava letterali);

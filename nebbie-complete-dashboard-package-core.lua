@@ -9,7 +9,7 @@
 -- docs/mudlet/analysis/RECOMMENDATION.md. Pattern prompt/eq basati su dati reali
 -- forniti dall'utente (docs/mudlet/analysis/Q&A.md, Round 3).
 
-local PKG_VER = "1.15.67"
+local PKG_VER = "1.15.71"
 local PKG_REPO = "wizardmorgan/nebbie-mudlet-dashboard"
 local PKG_FILE = "nebbie-complete-dashboard-package.mpackage"
 -- @main su jsDelivr puo' restare stale (osservato: restava 1.15.56 mentre tip
@@ -530,7 +530,9 @@ function NebbieDash.ensurePreferencesFile()
     "weapon_swap_delay = 0.5\n" ..
     "sanity_neq_on_login = on\n" ..
     "text_highlights = on\n" ..
-    "chat_window = on\n"
+    "chat_window = on\n" ..
+    "# gold_alert = on           # avvisa se G: scende senza split/give/drop/pagamenti\n" ..
+    "gold_alert = on\n"
   )
   f:close()
 end
@@ -548,6 +550,7 @@ function NebbieDash.loadPreferences()
     sanity_neq_on_login = true,
     text_highlights = true,
     chat_window = true,
+    gold_alert = true,
   }
   local path = NebbieDash.preferencesPath()
   if type(io.exists) == "function" and io.exists(path) then
@@ -568,6 +571,8 @@ function NebbieDash.loadPreferences()
             NebbieDash.prefs.text_highlights = NebbieDash.parsePreferencesBool(val)
           elseif key == "chat_window" then
             NebbieDash.prefs.chat_window = NebbieDash.parsePreferencesBool(val)
+          elseif key == "gold_alert" then
+            NebbieDash.prefs.gold_alert = NebbieDash.parsePreferencesBool(val)
           end
         end
       end
@@ -578,6 +583,7 @@ function NebbieDash.loadPreferences()
   NebbieDash.weaponSwapDelay = NebbieDash.prefs.weapon_swap_delay or NebbieDash.weaponSwapDelay
   NebbieDash.textHighlights = NebbieDash.prefs.text_highlights ~= false
   NebbieDash.chatEnabled = NebbieDash.prefs.chat_window ~= false
+  NebbieDash.goldAlert = NebbieDash.prefs.gold_alert ~= false
 end
 
 function NebbieDash.savePreferencesFile()
@@ -591,7 +597,8 @@ function NebbieDash.savePreferencesFile()
     "weapon_swap_delay = " .. tostring(NebbieDash.weaponSwapDelay or 0.5) .. "\n" ..
     "sanity_neq_on_login = " .. ((NebbieDash.prefs and NebbieDash.prefs.sanity_neq_on_login) and "on" or "off") .. "\n" ..
     "text_highlights = " .. ((NebbieDash.prefs and NebbieDash.prefs.text_highlights ~= false) and "on" or "off") .. "\n" ..
-    "chat_window = " .. ((NebbieDash.chatEnabled ~= false) and "on" or "off") .. "\n"
+    "chat_window = " .. ((NebbieDash.chatEnabled ~= false) and "on" or "off") .. "\n" ..
+    "gold_alert = " .. ((NebbieDash.goldAlert ~= false) and "on" or "off") .. "\n"
   )
   f:close()
 end
@@ -760,6 +767,7 @@ function NebbieDash.setCurrentCharacter(name, manual)
     return
   end
   NebbieDash.currentChar = name
+  NebbieDash.resetGoldAlertBaseline(nil)
   local data = NebbieDash.getCharData(name)
   data.lastSeen = os.time()
   -- Ogni volta che si (ri)diventa questo personaggio, le spell "conosciute"
@@ -812,6 +820,7 @@ function NebbieDash.onConnectionEvent()
   -- prompt fresco, cosi' non si rischia piu' di agire sul personaggio
   -- sbagliato senza accorgersene.
   NebbieDash.currentChar = nil
+  NebbieDash.resetGoldAlertBaseline(nil)
   NebbieDash._awaitingPromptAfterConnect = true
   NebbieDash._sanityNeqForChar = {}
   NebbieDash.refreshDashboard()
@@ -874,6 +883,9 @@ function NebbieDash.onPromptLine()
   NebbieDash.stats = parsed
   NebbieDash.setCurrentCharacter(parsed.name, false)
   NebbieDash._awaitingPromptAfterConnect = false
+  if parsed.gold ~= nil then
+    NebbieDash.checkGoldAlertFromPrompt(parsed.gold)
+  end
   NebbieDash.updateVitalsDisplay()
   NebbieDash.enforceTriggerHygiene()
   if NebbieDash._batch and NebbieDash._batch.active and NebbieDash._batch.awaitingOutput then
@@ -1212,6 +1224,7 @@ NebbieDash.SHORTCUT_RESERVED = {
   nknowdb = true, nknowdbreload = true,
   npackageupdate = true,
   nchat = true,
+  ngoldalert = true,
   nidentui = true,
   usa = true,
   nconfigdir = true,
@@ -3457,6 +3470,7 @@ NebbieDash.HELP_TEXT = {
   { "nknowdbreload", "Ricarica nebbie-know-db.lua dalla cartella condivisa." },
   { "nchat", "Mostra/nascondi la finestra floating chat (say/gt/tell/whisper/ask/gossip/shout)." },
   { "nchat on|off|clear", "Attiva/disattiva o svuota la finestra chat." },
+  { "ngoldalert <on|off>", "Avvisa se ti sottraggono monete (ignora split/give/drop/pagamenti)." },
   { "identify <arma>", "(comando di gioco) Rileva il tipo di danno (slash/blunt/pierce) per usa/disarmo." },
   { "nhelp", "Mostra/nascondi questa finestra." },
 }
@@ -3865,6 +3879,128 @@ function NebbieDash.updateVitalsDisplay()
   -- una vera barra HP/Mana/Move e' rimandata a una fase successiva (fuori dal
   -- gap risolto ora) e va progettata separatamente se richiesta.
 end
+
+
+-- ---------------------------------------------------------------------------
+-- Allarme monete sottratte (prompt G:)
+--
+-- Il furto riuscito (do_steal) e' SILENZIOSO per la vittima: l'unico segnale
+-- affidabile e' il calo di G: sul prompt. Sopprimiamo i cali attesi da
+-- azioni volontarie (split, give coin, drop coin, pagamenti shop/asta) sia
+-- dai comandi inviati sia dagli echo di conferma del MUD.
+-- ---------------------------------------------------------------------------
+NebbieDash.goldAlert = true
+NebbieDash.GOLD_SPEND_GRACE_SEC = 3.0
+
+function NebbieDash.armGoldSpendExpected(reason, seconds)
+  local sec = tonumber(seconds) or NebbieDash.GOLD_SPEND_GRACE_SEC or 3.0
+  local untilAt = os.clock() + sec
+  if (NebbieDash._goldSpendExpectedUntil or 0) < untilAt then
+    NebbieDash._goldSpendExpectedUntil = untilAt
+  end
+  NebbieDash._goldSpendReason = reason or NebbieDash._goldSpendReason
+end
+
+function NebbieDash.goldSpendExpectedNow()
+  local untilAt = NebbieDash._goldSpendExpectedUntil or 0
+  return os.clock() <= untilAt
+end
+
+function NebbieDash.resetGoldAlertBaseline(gold)
+  NebbieDash._lastPromptGold = gold
+  NebbieDash._goldAlertReady = (gold ~= nil)
+end
+
+function NebbieDash.isVoluntaryGoldCommand(cmd)
+  cmd = (cmd or ""):lower():match("^%s*(.-)%s*$") or ""
+  if cmd == "" then return false end
+  -- togli eventuale prefisso di ripetizione tipo ".3 give ..."
+  cmd = cmd:gsub("^%.%d+%s*", "")
+  if cmd:match("^split%s+") or cmd == "split" then return true end
+  if cmd:match("^nsplit%s+") then return true end
+  -- give 100 coin bob / give 100 monet ...
+  if cmd:match("^give%s+%d+%s+coin") or cmd:match("^give%s+%d+%s+monet") then return true end
+  if cmd:match("^give%s+all%.?coin") or cmd:match("^give%s+all%.?monet") then return true end
+  if cmd:match("^drop%s+%d+%s+coin") or cmd:match("^drop%s+%d+%s+monet") then return true end
+  if cmd:match("^drop%s+all%.?coin") or cmd:match("^drop%s+all%.?monet") then return true end
+  if cmd:match("^drop%s+coin") or cmd:match("^drop%s+monet") then return true end
+  if cmd:match("^buy%s+") or cmd:match("^purchase%s+") then return true end
+  if cmd:match("^offer%s+") or cmd:match("^bid%s+") then return true end
+  if cmd:match("^asta%s+") or cmd:match("^auction%s+") then return true end
+  return false
+end
+
+function NebbieDash.isVoluntaryGoldSpendLine(text)
+  text = NebbieDash.stripColors(text or ""):match("^%s*(.-)%s*$") or ""
+  if text == "" then return false end
+  if text:match("^Hai diviso ") then return true end
+  if text:match("^Dai una moneta ") then return true end
+  if text:match("^Dai %d+ monete d'oro a ") then return true end
+  if text:match("^Posi una moneta%.%s*$") then return true end
+  if text:match("^Posi alcune monete%.%s*$") then return true end
+  if text:match("^Paghi %d+ monete") then return true end
+  -- Asta: offerta accettata (il G: scende al prompt successivo)
+  if text:match("^Un offerta di %d+ monete e' stata ricevuta") then return true end
+  return false
+end
+
+function NebbieDash.onGoldSpendConfirmLine()
+  local text = line or (type(getCurrentLine) == "function" and getCurrentLine()) or ""
+  if NebbieDash.isVoluntaryGoldSpendLine(text) then
+    NebbieDash.armGoldSpendExpected("echo", 3.5)
+  end
+end
+
+function NebbieDash.onDataSendRequest(_, cmd)
+  if NebbieDash.isVoluntaryGoldCommand(cmd) then
+    NebbieDash.armGoldSpendExpected("cmd", 3.5)
+  end
+end
+
+function NebbieDash.checkGoldAlertFromPrompt(gold)
+  if NebbieDash.goldAlert == false then
+    NebbieDash._lastPromptGold = gold
+    return
+  end
+  if gold == nil then return end
+  if not NebbieDash._goldAlertReady or NebbieDash._lastPromptGold == nil then
+    NebbieDash.resetGoldAlertBaseline(gold)
+    return
+  end
+  local prev = NebbieDash._lastPromptGold
+  NebbieDash._lastPromptGold = gold
+  if gold >= prev then return end
+  local delta = prev - gold
+  if NebbieDash.goldSpendExpectedNow() then
+    return
+  end
+  cecho(string.format(
+    "<red>[NebbieDash] ATTENZIONE: monete sottratte! <white>G:%d <red>→ <white>%d <red>(-%d)\n",
+    prev, gold, delta))
+  -- Suono opzionale: gold_loss= in nebbie-dash-sounds.txt
+  if type(NebbieDash.playHighlightSound) == "function" then
+    pcall(NebbieDash.playHighlightSound, "gold_loss")
+  end
+end
+
+function NebbieDash.cmdSetGoldAlert(argStr)
+  argStr = (argStr or ""):match("^%s*(.-)%s*$"):lower()
+  if argStr == "on" then
+    NebbieDash.goldAlert = true
+  elseif argStr == "off" then
+    NebbieDash.goldAlert = false
+  else
+    cecho("<orange>[NebbieDash] Uso: ngoldalert <on|off> (attuale: " ..
+      ((NebbieDash.goldAlert ~= false) and "on" or "off") .. ")\n")
+    return
+  end
+  NebbieDash.prefs = NebbieDash.prefs or {}
+  NebbieDash.prefs.gold_alert = NebbieDash.goldAlert and true or false
+  NebbieDash.savePreferencesFile()
+  cecho("<green>[NebbieDash] Allarme monete sottratte: " ..
+    ((NebbieDash.goldAlert ~= false) and "on" or "off") .. " <grey>(salvato).\n")
+end
+
 
 -- ---------------------------------------------------------------------------
 -- Loot (soldi dal cadavere) + split automatico col gruppo.
@@ -6123,7 +6259,8 @@ function NebbieDash.ensureSoundsFile()
     "humber =\n" ..
     "dig_done =\n" ..
     "sanc_gone =\n" ..
-    "aura_loss =\n"
+    "aura_loss =\n" ..
+    "gold_loss =\n"
   )
   f:close()
 end
@@ -6136,7 +6273,9 @@ function NebbieDash.loadSoundsConfig()
     dig_done = "",
     sanc_gone = "",
     aura_loss = "",
+    gold_loss = "",
   }
+  if NebbieDash.sounds.gold_loss == nil then NebbieDash.sounds.gold_loss = "" end
   local path = NebbieDash.soundsPath()
   if type(io.exists) ~= "function" or not io.exists(path) then return end
   local f = io.open(path, "r")
@@ -7083,6 +7222,7 @@ function NebbieDash.startSplitFlow(amount)
   if NebbieDash._groupCheckActive then
     NebbieDash.finishSplitFlow(false)
   end
+  NebbieDash.armGoldSpendExpected("autosplit", 3.5)
   send("split " .. tostring(amount), false)
   cecho("<green>[NebbieDash] Split automatico: " .. amount .. " monete.\n")
 end
@@ -7094,6 +7234,7 @@ function NebbieDash.finishSplitFlow(grouped)
   local amount = NebbieDash._pendingSplitAmount
   NebbieDash._pendingSplitAmount = nil
   if grouped and amount then
+    NebbieDash.armGoldSpendExpected("autosplit", 3.5)
     send("split " .. tostring(amount), false)
     cecho("<green>[NebbieDash] Split automatico: " .. amount .. " monete.\n")
   end
@@ -7133,6 +7274,7 @@ function NebbieDash.cmdSplit(argStr)
     cecho("<orange>[NebbieDash] Uso: nsplit <numero>\n")
     return
   end
+  NebbieDash.armGoldSpendExpected("nsplit", 3.5)
   send("split " .. tostring(amount), false)
 end
 
@@ -8346,6 +8488,9 @@ function NebbieDash.teardownTriggers()
     NebbieDash._eqLineTrig, NebbieDash._attribLineTrig, NebbieDash._lootLineTrig,
     NebbieDash._lootLineTrig2, NebbieDash._groupSoloTrig, NebbieDash._groupHeaderTrig, NebbieDash._combatEndTrig,
     NebbieDash._combatEndTrig2,
+    NebbieDash._goldHaiDivisoTrig, NebbieDash._goldDaiMonetaTrig, NebbieDash._goldDaiMoneteTrig,
+    NebbieDash._goldPosiMonetaTrig, NebbieDash._goldPosiMoneteTrig, NebbieDash._goldPaghiTrig,
+    NebbieDash._goldAstaTrig,
     NebbieDash._fallTrig, NebbieDash._disarmTrig, NebbieDash._hungerTrig, NebbieDash._thirstTrig,
     NebbieDash._wieldTrig, NebbieDash._identifyObjTrig, NebbieDash._identifyDmgTrig,
     NebbieDash._identKnowledgeTrig, NebbieDash._identSourceSpellTrig, NebbieDash._identSourceScrollTrig,
@@ -8397,6 +8542,14 @@ function NebbieDash.installTriggers()
   -- finche' non serve un controllo (dopo un loot riuscito).
   NebbieDash._lootLineTrig = tempTrigger("C'erano", [[NebbieDash.onLootLine()]])
   NebbieDash._lootLineTrig2 = tempTrigger("C'era una miserabile moneta", [[NebbieDash.onLootLine()]])
+  -- Conferme spesa volontaria → grace period per allarme G:
+  NebbieDash._goldHaiDivisoTrig = tempTrigger("Hai diviso ", [[NebbieDash.onGoldSpendConfirmLine()]])
+  NebbieDash._goldDaiMonetaTrig = tempTrigger("Dai una moneta ", [[NebbieDash.onGoldSpendConfirmLine()]])
+  NebbieDash._goldDaiMoneteTrig = tempTrigger(" monete d'oro a ", [[NebbieDash.onGoldSpendConfirmLine()]])
+  NebbieDash._goldPosiMonetaTrig = tempTrigger("Posi una moneta.", [[NebbieDash.onGoldSpendConfirmLine()]])
+  NebbieDash._goldPosiMoneteTrig = tempTrigger("Posi alcune monete.", [[NebbieDash.onGoldSpendConfirmLine()]])
+  NebbieDash._goldPaghiTrig = tempTrigger("Paghi ", [[NebbieDash.onGoldSpendConfirmLine()]])
+  NebbieDash._goldAstaTrig = tempTrigger("Un offerta di ", [[NebbieDash.onGoldSpendConfirmLine()]])
   -- Trigger gruppo attivi solo durante startSplitFlow (vedi finishSplitFlow).
   -- Substring + validazione in handler (stripColors, pattern server reale):
   --   But you are a member of no group?!
@@ -8464,6 +8617,7 @@ function NebbieDash.installTriggers()
     registerAnonymousEventHandler("sysWindowResizeEvent", "NebbieDash.onWindowResize")
     registerAnonymousEventHandler("sysInstallPackage", "NebbieDash.onInstallPackageEvent")
     registerAnonymousEventHandler("sysUninstallPackage", "NebbieDash.onUninstallPackageEvent")
+    registerAnonymousEventHandler("sysDataSendRequest", "NebbieDash.onDataSendRequest")
     NebbieDash._eventHandlersRegistered = true
   end
   NebbieDash.installSpellShortcutTriggers()
