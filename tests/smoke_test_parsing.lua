@@ -1679,6 +1679,90 @@ local echoTell = NebbieDash.formatChatEcho(NebbieDash.parseChatLine("Tu dici a M
 check("chat: format echo tell ha freccia",
   echoTell and echoTell:find("Tu → Mirari", 1, true) ~= nil)
 
+-- Gold theft alert: prompt G: drop without voluntary spend
+do
+  NebbieDash.goldAlert = true
+  NebbieDash.resetGoldAlertBaseline(nil)
+  NebbieDash._goldSpendExpectedUntil = 0
+  local alertLog = {}
+  local realCecho = _G.cecho
+  _G.cecho = function(msg) alertLog[#alertLog + 1] = tostring(msg or "") end
+
+  NebbieDash.checkGoldAlertFromPrompt(500)
+  check("goldalert: baseline no alert", #alertLog == 0)
+  check("goldalert: baseline stored", NebbieDash._lastPromptGold == 500 and NebbieDash._goldAlertReady == true)
+
+  NebbieDash.checkGoldAlertFromPrompt(400)
+  check("goldalert: theft drop alerts", #alertLog == 1
+    and alertLog[1]:find("monete sottratte", 1, true) ~= nil
+    and alertLog[1]:find("-100", 1, true) ~= nil)
+  check("goldalert: last updated after theft", NebbieDash._lastPromptGold == 400)
+
+  alertLog = {}
+  NebbieDash.armGoldSpendExpected("test", 5)
+  check("goldalert: arm sets grace", NebbieDash.goldSpendExpectedNow() == true)
+  NebbieDash.checkGoldAlertFromPrompt(300)
+  check("goldalert: voluntary grace suppresses", #alertLog == 0)
+  check("goldalert: last updated after grace", NebbieDash._lastPromptGold == 300)
+
+  alertLog = {}
+  NebbieDash._goldSpendExpectedUntil = 0
+  NebbieDash.checkGoldAlertFromPrompt(350)
+  check("goldalert: gain no alert", #alertLog == 0)
+  check("goldalert: last after gain", NebbieDash._lastPromptGold == 350)
+
+  NebbieDash.goldAlert = false
+  alertLog = {}
+  NebbieDash.checkGoldAlertFromPrompt(200)
+  check("goldalert: disabled no alert", #alertLog == 0)
+  check("goldalert: disabled still tracks", NebbieDash._lastPromptGold == 200)
+
+  NebbieDash.goldAlert = true
+  NebbieDash._lastPromptGold = 200
+  NebbieDash._goldAlertReady = true
+  alertLog = {}
+  check("goldalert: Hai diviso match", NebbieDash.isVoluntaryGoldSpendLine("Hai diviso 50 monete.") == true)
+  NebbieDash.armGoldSpendExpected("echo", 3.5)
+  NebbieDash.checkGoldAlertFromPrompt(150)
+  check("goldalert: Hai diviso suppresses", #alertLog == 0)
+
+  alertLog = {}
+  NebbieDash._goldSpendExpectedUntil = 0
+  NebbieDash._lastPromptGold = 150
+  check("goldalert: Dai match", NebbieDash.isVoluntaryGoldSpendLine("Dai 20 monete d'oro a Mirari.") == true)
+  NebbieDash.armGoldSpendExpected("echo", 3.5)
+  NebbieDash.checkGoldAlertFromPrompt(130)
+  check("goldalert: Dai suppresses", #alertLog == 0)
+
+  check("goldalert: Posi una match", NebbieDash.isVoluntaryGoldSpendLine("Posi una moneta.") == true)
+  check("goldalert: Posi alcune match", NebbieDash.isVoluntaryGoldSpendLine("Posi alcune monete.") == true)
+  check("goldalert: Paghi match", NebbieDash.isVoluntaryGoldSpendLine("Paghi 5 monete d'oro.") == true)
+  check("goldalert: asta match",
+    NebbieDash.isVoluntaryGoldSpendLine("Un offerta di 1000 monete e' stata ricevuta.") == true)
+  check("goldalert: unrelated echo no match", NebbieDash.isVoluntaryGoldSpendLine("Tu dici 'ciao'") == false)
+
+  check("goldalert: cmd split", NebbieDash.isVoluntaryGoldCommand("split 100") == true)
+  check("goldalert: cmd give monete", NebbieDash.isVoluntaryGoldCommand("give 50 monete mirari") == true)
+  check("goldalert: cmd drop coins", NebbieDash.isVoluntaryGoldCommand("drop 10 coins") == true)
+  check("goldalert: cmd buy", NebbieDash.isVoluntaryGoldCommand("buy potion") == true)
+  check("goldalert: cmd say no", NebbieDash.isVoluntaryGoldCommand("say ciao") == false)
+  check("goldalert: cmd .3 give", NebbieDash.isVoluntaryGoldCommand(".3 give 10 coin bob") == true)
+
+  NebbieDash._goldSpendExpectedUntil = 0
+  NebbieDash._lastPromptGold = 130
+  NebbieDash._goldAlertReady = true
+  alertLog = {}
+  NebbieDash.onDataSendRequest(nil, "give 10 coin mirari")
+  check("goldalert: onDataSend arms", NebbieDash.goldSpendExpectedNow() == true)
+  NebbieDash.checkGoldAlertFromPrompt(120)
+  check("goldalert: cmd path suppresses", #alertLog == 0)
+
+  _G.cecho = realCecho
+  NebbieDash.goldAlert = true
+  NebbieDash.resetGoldAlertBaseline(nil)
+  NebbieDash._goldSpendExpectedUntil = 0
+end
+
 print("")
 if failures == 0 then
   print("TUTTI I TEST OK (" .. #eqLines .. " righe eq, " .. #attribLines .. " righe attrib)")
