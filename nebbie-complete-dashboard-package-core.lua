@@ -9,7 +9,7 @@
 -- docs/mudlet/analysis/RECOMMENDATION.md. Pattern prompt/eq basati su dati reali
 -- forniti dall'utente (docs/mudlet/analysis/Q&A.md, Round 3).
 
-local PKG_VER = "1.15.83"
+local PKG_VER = "1.15.84"
 local PKG_REPO = "wizardmorgan/nebbie-mudlet-dashboard"
 local PKG_FILE = "nebbie-complete-dashboard-package.mpackage"
 -- @main su jsDelivr puo' restare stale (osservato: restava 1.15.56 mentre tip
@@ -4187,7 +4187,8 @@ end
 function NebbieDash.parseAuctionBidAmount(text)
   text = NebbieDash.stripColors(text or ""):match("^%s*(.-)%s*$") or ""
   if text == "" then return nil end
-  local raw = text:match("Un'?offerta di ([%d%.,]+) monete e' stata ricevuta")
+  -- Server: "Un offerta" (spazio); italiano corretto / display: "Un'offerta".
+  local raw = text:match("Un'?%s*offerta di ([%d%.,]+) monete e' stata ricevuta")
   return NebbieDash.parseGroupedInt(raw)
 end
 

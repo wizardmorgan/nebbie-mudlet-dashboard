@@ -1,5 +1,10 @@
 # CHANGELOG — nebbie-complete-dashboard-package
 
+## 1.15.84 — 2026-11-16
+
+- **ngoldalert / asta**: match anche `Un offerta` (spazio, come in auction.cpp),
+  oltre a `Un'offerta`.
+
 ## 1.15.83 — 2026-11-16
 
 - **ngoldalert / asta**: il tell `[Il Banditore] 'Un offerta di N…'` non
