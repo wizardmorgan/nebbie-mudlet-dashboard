@@ -1,5 +1,10 @@
 # CHANGELOG — nebbie-complete-dashboard-package
 
+## 1.16.17 — 2026-11-18
+
+- **nchat**: cattura anche **telepathy** (`Tu mandi a … il pensiero '…'`,
+  `[Nome] ti manda il pensiero '…'`).
+
 ## 1.16.16 — 2026-11-18
 
 - **nchat**: cattura anche skill **sending** / messenger (`Mandi a … il

@@ -2147,6 +2147,18 @@ local echoSend = NebbieDash.formatChatEcho(
 check("chat: format echo send ha freccia",
   echoSend and echoSend:find("Tu → Mirari", 1, true) ~= nil
     and echoSend:find("[send]", 1, true) ~= nil)
+chatOk("chat: telep self", "Tu mandi a Mirari il pensiero 'psst'", "telep", "Tu", "psst", "Mirari")
+chatOk("chat: telep other", "[Hayato] ti manda il pensiero 'qui'", "telep", "Hayato", "qui")
+check("chat: telep non confuso con send",
+  NebbieDash.parseChatLine("[X] ti manda il pensiero 'y'").channel == "telep"
+    and NebbieDash.parseChatLine("[X] ti manda il messaggio 'y'").channel == "send"
+    and NebbieDash.parseChatLine("Tu mandi a Bob il pensiero 'z'").channel == "telep"
+    and NebbieDash.parseChatLine("Mandi a Bob il messaggio 'z'").channel == "send")
+local echoTelep = NebbieDash.formatChatEcho(
+  NebbieDash.parseChatLine("Tu mandi a Mirari il pensiero 'psst'"))
+check("chat: format echo telep ha freccia",
+  echoTelep and echoTelep:find("Tu → Mirari", 1, true) ~= nil
+    and echoTelep:find("[telep]", 1, true) ~= nil)
 chatOk("chat: whisper self", "Tu sussurri a Sirio, 'psst'", "whisper", "Tu", "psst", "Sirio")
 chatOk("chat: whisper other", "[Sirio] ti sussurra 'ok'", "whisper", "Sirio", "ok")
 chatOk("chat: ask self", "Tu chiedi a Goblin, 'chi sei'", "ask", "Tu", "chi sei", "Goblin")
@@ -2710,9 +2722,9 @@ check("identui: prefer Adjustable (ancoraggio destro)",
   NebbieDash.IDENT_UI_ADJ_X == "-580px")
 check("identui: container Panel (no collisioni legacy)",
   NebbieDash.IDENT_UI_CONTAINER == "NebbieDashIdentUiPanel")
-check("package version 1.16.16+",
+check("package version 1.16.17+",
   type(NebbieDash.version) == "string"
-    and not NebbieDash.versionLessThan(NebbieDash.version, "1.16.16"))
+    and not NebbieDash.versionLessThan(NebbieDash.version, "1.16.17"))
 
 -- Re-identify sposta possesso da un toon all'altro.
 do
