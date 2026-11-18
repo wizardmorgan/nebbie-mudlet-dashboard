@@ -276,6 +276,7 @@ Dalla **1.15.63** una finestra floating raccoglie i canali di comunicazione:
 | gtell | `gt` / `gtell` |
 | clantell | clan / casata (`Tu dici al clan/casata '…'`, `[Nome] dice al clan/casata '…'`) |
 | tell | `tell` |
+| send | `sending` / `messenger` (`Mandi a … il messaggio '…'`, `[Nome] ti manda il messaggio '…'`) |
 | whisper | `whisper` |
 | ask | `ask` |
 | gossip | `gossip` |

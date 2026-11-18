@@ -1,5 +1,10 @@
 # CHANGELOG — nebbie-complete-dashboard-package
 
+## 1.16.16 — 2026-11-18
+
+- **nchat**: cattura anche skill **sending** / messenger (`Mandi a … il
+  messaggio '…'`, `[Nome] ti manda il messaggio '…'`).
+
 ## 1.16.15 — 2026-11-18
 
 - **nidentdb**: se un toon re-identa un pezzo già in DB assegnato a un altro
