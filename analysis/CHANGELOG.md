@@ -1,5 +1,11 @@
 # CHANGELOG — nebbie-complete-dashboard-package
 
+## 1.16.46 — 2026-11-22
+
+- **Maniglia Equip visibile**: la MiniConsole non copre piu' il bordo di
+  drag (lascia 8px liberi); barra grigio-blu ben visibile e cliccabile.
+  Prima (1.16.45) la maniglia restava sotto il pannello e non si vedeva.
+
 ## 1.16.45 — 2026-11-22
 
 - **Larghezza Equip trascinabile**: sul bordo destro della colonna Equip

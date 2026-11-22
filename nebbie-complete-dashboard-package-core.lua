@@ -9,7 +9,7 @@
 -- docs/mudlet/analysis/RECOMMENDATION.md. Pattern prompt/eq basati su dati reali
 -- forniti dall'utente (docs/mudlet/analysis/Q&A.md, Round 3).
 
-local PKG_VER = "1.16.45"
+local PKG_VER = "1.16.46"
 local PKG_REPO = "wizardmorgan/nebbie-mudlet-dashboard"
 local PKG_FILE = "nebbie-complete-dashboard-package.mpackage"
 -- @main su jsDelivr puo' restare stale (osservato: restava 1.15.56 mentre tip
@@ -2752,7 +2752,9 @@ end
 NebbieDash.guiRatios = { equip = 1.0, manualEquip = false }
 NebbieDash.dividerPx = 4
 -- Spessore maniglia verticale sul bordo destro della colonna Equip (drag → nwidth).
-NebbieDash.equipEdgePx = 5
+-- Lasciata libera: la MiniConsole Equip e' larga sideW - edge, cosi' la label
+-- non resta sotto il console (invisibile / non cliccabile).
+NebbieDash.equipEdgePx = 8
 NebbieDash.GUI_WINDOWS = { "NebbieDashEquip" }
 NebbieDash.ALL_GUI_ELEMENTS = {
   "NebbieDashEquip",
@@ -6942,9 +6944,12 @@ function NebbieDash.setupEquipEdgeDrag()
 end
 
 function NebbieDash.initDockSidebar()
-  setBorderLeft(NebbieDash.guiWidthEquip)
+  local sideW = NebbieDash.guiWidthEquip or 260
+  local edge = NebbieDash.equipEdgePx or 8
+  local consoleW = math.max(120, sideW - edge)
+  setBorderLeft(sideW)
   setBorderRight(0)
-  createMiniConsole("NebbieDashEquip", 0, 0, NebbieDash.guiWidthEquip, 0)
+  createMiniConsole("NebbieDashEquip", 0, 0, consoleW, 0)
   if type(enableScrollBar) == "function" then
     enableScrollBar("NebbieDashEquip", true)
   end
@@ -7096,19 +7101,34 @@ function NebbieDash.applyAutoWidth()
   setBorderRight(0)
 end
 
+-- Stile maniglia: barra chiara visibile sul bordo destro della colonna Equip.
+function NebbieDash.applyEquipEdgeStyle()
+  if type(setBackgroundColor) == "function" then
+    pcall(setBackgroundColor, "NebbieDashEquipEdge", 140, 145, 170, 255)
+  end
+  if type(setLabelStyleSheet) == "function" then
+    pcall(setLabelStyleSheet, "NebbieDashEquipEdge",
+      "background-color: rgb(120, 125, 155);"
+        .. " border-left: 1px solid rgb(190, 195, 220);"
+        .. " border-right: 1px solid rgb(50, 50, 70);")
+  end
+  if type(echo) == "function" then
+    -- Centro verticale: tre linee tipo "grip" (ASCII, leggibile in gioco).
+    pcall(echo, "NebbieDashEquipEdge", "")
+  end
+end
+
 -- Crea la maniglia di resize se manca (es. upgrade a caldo senza teardown completo).
 function NebbieDash.ensureEquipEdgeLabel()
   if NebbieDash._equipEdgeCreated then return end
   if type(createLabel) ~= "function" then return end
-  local edge = NebbieDash.equipEdgePx or 5
+  local edge = NebbieDash.equipEdgePx or 8
   local sideW = NebbieDash.guiWidthEquip or 260
+  -- fillBackground=1: area cliccabile opaca (necessario per i callback drag).
   pcall(createLabel, "NebbieDashEquipEdge", math.max(0, sideW - edge), 0, edge, 100, 1)
-  if type(setBackgroundColor) == "function" then
-    pcall(setBackgroundColor, "NebbieDashEquipEdge", 70, 70, 90, 180)
-  end
-  if type(setLabelStyleSheet) == "function" then
-    pcall(setLabelStyleSheet, "NebbieDashEquipEdge",
-      "background-color: rgba(70, 70, 90, 160); border-left: 1px solid rgba(120, 120, 140, 200);")
+  NebbieDash.applyEquipEdgeStyle()
+  if type(enableClickthrough) == "function" then
+    pcall(enableClickthrough, "NebbieDashEquipEdge", false)
   end
   NebbieDash._equipEdgeCreated = true
   NebbieDash._equipWidthDragReady = false
@@ -7125,7 +7145,8 @@ function NebbieDash.positionEquipEdge()
   local _w, h = getMainWindowSize()
   h = h or 600
   local sideW = NebbieDash.guiWidthEquip or 260
-  local edge = NebbieDash.equipEdgePx or 5
+  local edge = NebbieDash.equipEdgePx or 8
+  -- Fascia libera a destra del MiniConsole Equip (non sovrapposta).
   local x = math.max(0, sideW - edge)
   if type(moveWindow) == "function" then
     pcall(moveWindow, "NebbieDashEquipEdge", x, 0)
@@ -7136,6 +7157,7 @@ function NebbieDash.positionEquipEdge()
   if type(showWindow) == "function" then
     pcall(showWindow, "NebbieDashEquipEdge")
   end
+  NebbieDash.applyEquipEdgeStyle()
   if type(raiseWindow) == "function" then
     pcall(raiseWindow, "NebbieDashEquipEdge")
   end
@@ -7146,8 +7168,11 @@ function NebbieDash.positionGUI()
   local _w, h = getMainWindowSize()
   h = h or 600
   local sideW = NebbieDash.guiWidthEquip or 260
+  local edge = NebbieDash.equipEdgePx or 8
+  -- Console piu' stretta della border: lascia spazio alla maniglia di drag.
+  local consoleW = math.max(120, sideW - edge)
   moveWindow("NebbieDashEquip", 0, 0)
-  resizeWindow("NebbieDashEquip", sideW, h)
+  resizeWindow("NebbieDashEquip", consoleW, h)
   NebbieDash.positionEquipEdge()
   NebbieDash.positionHelpButton()
 end
