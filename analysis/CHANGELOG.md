@@ -1,5 +1,12 @@
 # CHANGELOG — nebbie-complete-dashboard-package
 
+## 1.16.45 — 2026-11-22
+
+- **Larghezza Equip trascinabile**: sul bordo destro della colonna Equip
+  c'e' una maniglia verticale; trascinala per cambiare la larghezza
+  (150–900 px). Disattiva l'auto-width e salva in `nebbie-dash-ui.lua`
+  (come `nwidth`). `nwidth auto` / `nlayout` ripristinano l'automatico.
+
 ## 1.16.44 — 2026-11-22
 
 - **nach raccolta solo porta 4000**: prefs `ach_port = 4000` (0 = tutte).

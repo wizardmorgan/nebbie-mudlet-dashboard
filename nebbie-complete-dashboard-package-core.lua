@@ -9,7 +9,7 @@
 -- docs/mudlet/analysis/RECOMMENDATION.md. Pattern prompt/eq basati su dati reali
 -- forniti dall'utente (docs/mudlet/analysis/Q&A.md, Round 3).
 
-local PKG_VER = "1.16.44"
+local PKG_VER = "1.16.45"
 local PKG_REPO = "wizardmorgan/nebbie-mudlet-dashboard"
 local PKG_FILE = "nebbie-complete-dashboard-package.mpackage"
 -- @main su jsDelivr puo' restare stale (osservato: restava 1.15.56 mentre tip
@@ -1018,6 +1018,18 @@ function NebbieDash.loadUiStore()
   if NebbieDash.uiState.showClanSlot == true then
     NebbieDash.showClanSlot = true
   end
+  -- Larghezza colonna Equip (drag bordo / nwidth) — resta in ui.lua (per-macchina).
+  local ew = tonumber(NebbieDash.uiState.equipWidth)
+  if ew and ew >= 150 and ew <= 900 then
+    NebbieDash.guiWidthEquip = math.floor(ew)
+  end
+  if NebbieDash.uiState.autoWidthEquip == false then
+    NebbieDash.autoWidthEquip = false
+    NebbieDash.autoWidthRight = false
+  elseif NebbieDash.uiState.autoWidthEquip == true then
+    NebbieDash.autoWidthEquip = true
+    NebbieDash.autoWidthRight = true
+  end
   -- font_size vive in nebbie-dash-preferences.txt (caricato dopo).
 end
 
@@ -1027,6 +1039,17 @@ function NebbieDash.persistGuiRatios()
     equip = NebbieDash.guiRatios and NebbieDash.guiRatios.equip,
     manualEquip = NebbieDash.guiRatios and NebbieDash.guiRatios.manualEquip,
   }
+  NebbieDash.saveUiStore()
+end
+
+-- Salva larghezza Equip e flag auto (drag bordo destro / nwidth).
+function NebbieDash.persistEquipWidth()
+  NebbieDash.uiState = NebbieDash.uiState or {}
+  local w = tonumber(NebbieDash.guiWidthEquip)
+  if w and w >= 150 and w <= 900 then
+    NebbieDash.uiState.equipWidth = math.floor(w)
+  end
+  NebbieDash.uiState.autoWidthEquip = NebbieDash.autoWidthEquip ~= false
   NebbieDash.saveUiStore()
 end
 
@@ -2728,9 +2751,12 @@ end
 -- Legacy (pre-1.15.96 ripartizione Equip/Speedwalk): tenuti per nheights no-op / migrazione.
 NebbieDash.guiRatios = { equip = 1.0, manualEquip = false }
 NebbieDash.dividerPx = 4
+-- Spessore maniglia verticale sul bordo destro della colonna Equip (drag → nwidth).
+NebbieDash.equipEdgePx = 5
 NebbieDash.GUI_WINDOWS = { "NebbieDashEquip" }
 NebbieDash.ALL_GUI_ELEMENTS = {
   "NebbieDashEquip",
+  "NebbieDashEquipEdge",
   -- Rimuovere residui di versioni precedenti:
   "NebbieDashSpeedwalks", "NebbieDashDivider",
 }
@@ -3251,6 +3277,9 @@ function NebbieDash.teardownGui()
   NebbieDash._floatSidebarCreated = false
   NebbieDash._equipRatioDragReady = false
   NebbieDash._equipRatioDrag = nil
+  NebbieDash._equipWidthDragReady = false
+  NebbieDash._equipWidthDrag = nil
+  NebbieDash._equipEdgeCreated = false
   NebbieDash.destroyChatWindow()
   NebbieDash.destroyIdentUiWindow()
   pcall(setBorderLeft, 0)
@@ -6792,6 +6821,39 @@ function NebbieDash.equipDividerPointerY(event)
   return 0
 end
 
+function NebbieDash.equipEdgePointerX(event)
+  if type(getMousePosition) == "function" then
+    local x = getMousePosition()
+    if type(x) == "number" then return x end
+  end
+  if type(event) == "table" then
+    return event.x or event.xPos or event["x-pos"] or 0
+  end
+  return 0
+end
+
+-- Clamp larghezza colonna Equip (stessi limiti di nwidth).
+function NebbieDash.clampEquipWidth(w)
+  w = tonumber(w) or NebbieDash.guiWidthEquip or 260
+  return math.max(150, math.min(900, math.floor(w)))
+end
+
+function NebbieDash.setEquipWidthFromPointerX(x)
+  local w = NebbieDash.clampEquipWidth(x)
+  NebbieDash.autoWidthEquip = false
+  NebbieDash.autoWidthRight = false
+  if w == NebbieDash.guiWidthEquip then
+    -- Anche se uguale, riposiziona la maniglia (mouse sul bordo).
+    NebbieDash.positionEquipEdge()
+    return
+  end
+  NebbieDash.guiWidthEquip = w
+  if type(setBorderLeft) == "function" then
+    pcall(setBorderLeft, w)
+  end
+  NebbieDash.positionGUI()
+end
+
 function NebbieDash.setEquipHeightRatioFromPointerY(y)
   local _w, h = getMainWindowSize()
   h = h or 600
@@ -6820,6 +6882,26 @@ function NebbieDash.onEquipDividerRelease(_event)
   NebbieDash.persistGuiRatios()
 end
 
+function NebbieDash.onEquipEdgePress(event)
+  if event and event.button and event.button ~= "LeftButton" then return end
+  NebbieDash._equipWidthDrag = true
+  NebbieDash.setEquipWidthFromPointerX(NebbieDash.equipEdgePointerX(event))
+end
+
+function NebbieDash.onEquipEdgeMove(event)
+  if not NebbieDash._equipWidthDrag then return end
+  NebbieDash.setEquipWidthFromPointerX(NebbieDash.equipEdgePointerX(event))
+end
+
+function NebbieDash.onEquipEdgeRelease(_event)
+  if not NebbieDash._equipWidthDrag then return end
+  NebbieDash._equipWidthDrag = nil
+  NebbieDash.persistEquipWidth()
+  if NebbieDash._guiCreated and NebbieDash._guiHidden ~= true then
+    NebbieDash.refreshDashboard()
+  end
+end
+
 function NebbieDash.setupEquipDividerDrag()
   if NebbieDash._equipRatioDragReady then return end
   if type(setLabelClickCallback) ~= "function"
@@ -6839,6 +6921,26 @@ function NebbieDash.setupEquipDividerDrag()
   NebbieDash._equipRatioDragReady = true
 end
 
+function NebbieDash.setupEquipEdgeDrag()
+  if NebbieDash._equipWidthDragReady then return end
+  if type(setLabelClickCallback) ~= "function"
+    or type(setLabelMoveCallback) ~= "function"
+    or type(setLabelReleaseCallback) ~= "function" then
+    return
+  end
+  if type(setLabelCursor) == "function" then
+    pcall(setLabelCursor, "NebbieDashEquipEdge", "splitHCursor")
+  end
+  if type(setLabelToolTip) == "function" then
+    setLabelToolTip("NebbieDashEquipEdge",
+      "Trascina per regolare la larghezza della colonna Equip (oppure nwidth)")
+  end
+  setLabelClickCallback("NebbieDashEquipEdge", "NebbieDash.onEquipEdgePress")
+  setLabelMoveCallback("NebbieDashEquipEdge", "NebbieDash.onEquipEdgeMove")
+  setLabelReleaseCallback("NebbieDashEquipEdge", "NebbieDash.onEquipEdgeRelease")
+  NebbieDash._equipWidthDragReady = true
+end
+
 function NebbieDash.initDockSidebar()
   setBorderLeft(NebbieDash.guiWidthEquip)
   setBorderRight(0)
@@ -6849,6 +6951,10 @@ function NebbieDash.initDockSidebar()
   if type(setMaxLines) == "function" then
     setMaxLines("NebbieDashEquip", 400)
   end
+  -- Maniglia verticale sul bordo destro della colonna (drag → larghezza).
+  NebbieDash._equipEdgeCreated = false
+  NebbieDash._equipWidthDragReady = false
+  NebbieDash.ensureEquipEdgeLabel()
   -- Rimuovi pannello speedwalk / divider di versioni precedenti (ora c'e' nswui).
   for _, win in ipairs({ "NebbieDashSpeedwalks", "NebbieDashDivider" }) do
     if type(deleteWindow) == "function" then pcall(deleteWindow, win)
@@ -6907,6 +7013,7 @@ function NebbieDash.destroyLegacyGuiWindows()
     "NebbieDashSpells", "NebbieDashWeapons", "NebbieDashDividerLeft",
     "NebbieDashAttrib", "NebbieDashSidebarContainer",
     "NebbieDashSpeedwalks", "NebbieDashDivider",
+    -- Non cancellare NebbieDashEquipEdge qui: e' gestito da ALL_GUI_ELEMENTS / teardownGui.
   }
   for _, win in ipairs(legacy) do
     if type(deleteWindow) == "function" then
@@ -6989,6 +7096,51 @@ function NebbieDash.applyAutoWidth()
   setBorderRight(0)
 end
 
+-- Crea la maniglia di resize se manca (es. upgrade a caldo senza teardown completo).
+function NebbieDash.ensureEquipEdgeLabel()
+  if NebbieDash._equipEdgeCreated then return end
+  if type(createLabel) ~= "function" then return end
+  local edge = NebbieDash.equipEdgePx or 5
+  local sideW = NebbieDash.guiWidthEquip or 260
+  pcall(createLabel, "NebbieDashEquipEdge", math.max(0, sideW - edge), 0, edge, 100, 1)
+  if type(setBackgroundColor) == "function" then
+    pcall(setBackgroundColor, "NebbieDashEquipEdge", 70, 70, 90, 180)
+  end
+  if type(setLabelStyleSheet) == "function" then
+    pcall(setLabelStyleSheet, "NebbieDashEquipEdge",
+      "background-color: rgba(70, 70, 90, 160); border-left: 1px solid rgba(120, 120, 140, 200);")
+  end
+  NebbieDash._equipEdgeCreated = true
+  NebbieDash._equipWidthDragReady = false
+  NebbieDash.setupEquipEdgeDrag()
+end
+
+function NebbieDash.positionEquipEdge()
+  if not NebbieDash._guiCreated then return end
+  NebbieDash.ensureEquipEdgeLabel()
+  if NebbieDash._guiHidden then
+    if type(hideWindow) == "function" then pcall(hideWindow, "NebbieDashEquipEdge") end
+    return
+  end
+  local _w, h = getMainWindowSize()
+  h = h or 600
+  local sideW = NebbieDash.guiWidthEquip or 260
+  local edge = NebbieDash.equipEdgePx or 5
+  local x = math.max(0, sideW - edge)
+  if type(moveWindow) == "function" then
+    pcall(moveWindow, "NebbieDashEquipEdge", x, 0)
+  end
+  if type(resizeWindow) == "function" then
+    pcall(resizeWindow, "NebbieDashEquipEdge", edge, h)
+  end
+  if type(showWindow) == "function" then
+    pcall(showWindow, "NebbieDashEquipEdge")
+  end
+  if type(raiseWindow) == "function" then
+    pcall(raiseWindow, "NebbieDashEquipEdge")
+  end
+end
+
 function NebbieDash.positionGUI()
   if not NebbieDash._guiCreated then return end
   local _w, h = getMainWindowSize()
@@ -6996,6 +7148,7 @@ function NebbieDash.positionGUI()
   local sideW = NebbieDash.guiWidthEquip or 260
   moveWindow("NebbieDashEquip", 0, 0)
   resizeWindow("NebbieDashEquip", sideW, h)
+  NebbieDash.positionEquipEdge()
   NebbieDash.positionHelpButton()
 end
 
@@ -7074,7 +7227,7 @@ NebbieDash.HELP_TEXT = {
   { "nitemlen <n>", "Lunghezza max descrizioni oggetti in equip." },
   { "nlayout", "Ripristina larghezza/font di default." },
   { "nresync", "Invia eq + attrib al MUD e aggiorna cache." },
-  { "nwidth [auto|<px>]", "Larghezza colonna Equip (bordo sinistro)." },
+  { "nwidth [auto|<px>]", "Larghezza colonna Equip (o trascina il bordo destro)." },
 
   { section = "Spell e cast" },
   { "<shortcut> [bersaglio]", "Alias globali da nebbie-spell-shortcuts.txt." },
@@ -7234,6 +7387,7 @@ function NebbieDash.resetLayout()
   NebbieDash.autoWidthRight = true
   NebbieDash.guiRatios = { equip = 0.5, manualEquip = false }
   NebbieDash.persistGuiRatios()
+  NebbieDash.persistEquipWidth()
   NebbieDash.applyFontSizeToAllWindows(15)
   NebbieDash.persistFontSize()
   if NebbieDash._guiCreated then
@@ -7278,12 +7432,13 @@ function NebbieDash.cmdSetFont(sizeStr)
   cecho("<green>[NebbieDash] Font dashboard (equip/chat/nach/ident/…) impostato a <white>" .. size .. "\n")
 end
 
--- Larghezza bordo sinistro (colonna Equip).
+-- Larghezza bordo sinistro (colonna Equip). Anche: trascina il bordo destro della colonna.
 function NebbieDash.cmdSetWidth(argStr)
   argStr = (argStr or ""):match("^%s*(.-)%s*$")
   if argStr == "" or argStr:lower() == "auto" then
     NebbieDash.autoWidthEquip = true
     NebbieDash.autoWidthRight = true
+    NebbieDash.persistEquipWidth()
     NebbieDash.refreshDashboard()
     cecho("<green>[NebbieDash] Larghezza colonna Equip: automatica.\n")
     return
@@ -7291,17 +7446,20 @@ function NebbieDash.cmdSetWidth(argStr)
   local width = tonumber(argStr)
   if not width or width < 150 or width > 900 then
     cecho("<orange>[NebbieDash] Uso: nwidth <numero 150-900> oppure <yellow>nwidth auto\n")
+    cecho("<grey>Oppure trascina il bordo destro della colonna Equip.\n")
     return
   end
   NebbieDash.autoWidthEquip = false
   NebbieDash.autoWidthRight = false
-  NebbieDash.guiWidthEquip = width
+  NebbieDash.guiWidthEquip = NebbieDash.clampEquipWidth(width)
+  NebbieDash.persistEquipWidth()
   if NebbieDash._guiCreated then
-    setBorderLeft(width)
+    setBorderLeft(NebbieDash.guiWidthEquip)
     setBorderRight(0)
     NebbieDash.positionGUI()
   end
-  cecho("<green>[NebbieDash] Larghezza colonna Equip impostata a " .. width .. " (manuale).\n")
+  cecho("<green>[NebbieDash] Larghezza colonna Equip impostata a "
+    .. NebbieDash.guiWidthEquip .. " (manuale).\n")
 end
 
 function NebbieDash.cmdSetHeights(_pctStr)
