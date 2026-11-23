@@ -1,5 +1,12 @@
 # CHANGELOG — nebbie-complete-dashboard-package
 
+## 1.16.47 — 2026-11-23
+
+- **Fix drag barra Equip**: `enableClickthrough(...)` abilitava il
+  pass-through dei click (barra grigia ma non trascinabile). Ora
+  `disableClickthrough` + `createLabel(..., 0)`. Durante il drag un poll
+  aggiorna la larghezza anche quando il mouse esce dalla maniglia (8px).
+
 ## 1.16.46 — 2026-11-22
 
 - **Maniglia Equip visibile**: la MiniConsole non copre piu' il bordo di

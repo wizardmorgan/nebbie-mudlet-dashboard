@@ -9,7 +9,7 @@
 -- docs/mudlet/analysis/RECOMMENDATION.md. Pattern prompt/eq basati su dati reali
 -- forniti dall'utente (docs/mudlet/analysis/Q&A.md, Round 3).
 
-local PKG_VER = "1.16.46"
+local PKG_VER = "1.16.47"
 local PKG_REPO = "wizardmorgan/nebbie-mudlet-dashboard"
 local PKG_FILE = "nebbie-complete-dashboard-package.mpackage"
 -- @main su jsDelivr puo' restare stale (osservato: restava 1.15.56 mentre tip
@@ -3261,6 +3261,10 @@ function NebbieDash.maybeSanityResyncEq(charName)
 end
 
 function NebbieDash.teardownGui()
+  NebbieDash._equipWidthDrag = nil
+  if type(NebbieDash.stopEquipWidthDragPoll) == "function" then
+    NebbieDash.stopEquipWidthDragPoll()
+  end
   for _, w in ipairs(NebbieDash.ALL_GUI_ELEMENTS or {}) do
     if type(deleteWindow) == "function" then pcall(deleteWindow, w) end
   end
@@ -6884,10 +6888,34 @@ function NebbieDash.onEquipDividerRelease(_event)
   NebbieDash.persistGuiRatios()
 end
 
+function NebbieDash.stopEquipWidthDragPoll()
+  if NebbieDash._equipWidthDragTimer and type(killTimer) == "function" then
+    pcall(killTimer, NebbieDash._equipWidthDragTimer)
+  end
+  NebbieDash._equipWidthDragTimer = nil
+end
+
+-- setLabelMoveCallback riceve move solo finche' il mouse resta DENTRO la
+-- label (8px): appena trascini fuori, si ferma. Poll finche' il drag e' attivo.
+function NebbieDash.startEquipWidthDragPoll()
+  NebbieDash.stopEquipWidthDragPoll()
+  if type(tempTimer) ~= "function" then return end
+  local function tick()
+    NebbieDash._equipWidthDragTimer = nil
+    if not NebbieDash._equipWidthDrag then return end
+    NebbieDash.setEquipWidthFromPointerX(NebbieDash.equipEdgePointerX(nil))
+    NebbieDash._equipWidthDragTimer = tempTimer(0.03, tick)
+  end
+  NebbieDash._equipWidthDragTimer = tempTimer(0.03, tick)
+end
+
 function NebbieDash.onEquipEdgePress(event)
-  if event and event.button and event.button ~= "LeftButton" then return end
+  if type(event) == "table" and event.button and event.button ~= "LeftButton" then
+    return
+  end
   NebbieDash._equipWidthDrag = true
   NebbieDash.setEquipWidthFromPointerX(NebbieDash.equipEdgePointerX(event))
+  NebbieDash.startEquipWidthDragPoll()
 end
 
 function NebbieDash.onEquipEdgeMove(event)
@@ -6898,6 +6926,7 @@ end
 function NebbieDash.onEquipEdgeRelease(_event)
   if not NebbieDash._equipWidthDrag then return end
   NebbieDash._equipWidthDrag = nil
+  NebbieDash.stopEquipWidthDragPoll()
   NebbieDash.persistEquipWidth()
   if NebbieDash._guiCreated and NebbieDash._guiHidden ~= true then
     NebbieDash.refreshDashboard()
@@ -7124,11 +7153,13 @@ function NebbieDash.ensureEquipEdgeLabel()
   if type(createLabel) ~= "function" then return end
   local edge = NebbieDash.equipEdgePx or 8
   local sideW = NebbieDash.guiWidthEquip or 260
-  -- fillBackground=1: area cliccabile opaca (necessario per i callback drag).
-  pcall(createLabel, "NebbieDashEquipEdge", math.max(0, sideW - edge), 0, edge, 100, 1)
+  -- fillBackground=1, enableClickthrough=0 (7° arg): altrimenti i click passano.
+  -- Attenzione: enableClickthrough(name) ABILITA il pass-through (rompe il drag);
+  -- serve disableClickthrough(name).
+  pcall(createLabel, "NebbieDashEquipEdge", math.max(0, sideW - edge), 0, edge, 100, 1, 0)
   NebbieDash.applyEquipEdgeStyle()
-  if type(enableClickthrough) == "function" then
-    pcall(enableClickthrough, "NebbieDashEquipEdge", false)
+  if type(disableClickthrough) == "function" then
+    pcall(disableClickthrough, "NebbieDashEquipEdge")
   end
   NebbieDash._equipEdgeCreated = true
   NebbieDash._equipWidthDragReady = false
@@ -7158,8 +7189,15 @@ function NebbieDash.positionEquipEdge()
     pcall(showWindow, "NebbieDashEquipEdge")
   end
   NebbieDash.applyEquipEdgeStyle()
+  -- Re-applica ad ogni position: dopo 1.16.46 poteva restare clickthrough on.
+  if type(disableClickthrough) == "function" then
+    pcall(disableClickthrough, "NebbieDashEquipEdge")
+  end
   if type(raiseWindow) == "function" then
     pcall(raiseWindow, "NebbieDashEquipEdge")
+  end
+  if not NebbieDash._equipWidthDragReady then
+    NebbieDash.setupEquipEdgeDrag()
   end
 end
 
